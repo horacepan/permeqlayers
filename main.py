@@ -43,6 +43,21 @@ class BaselineEmbedDeepSets(nn.Module):
         sets = torch.hstack([set1, set2])
         return self.fc_out(sets)
 
+class Eq1to2Net(nn.Module):
+    def __init__(self, nembed, embed_dim, hid_dim, num_classes=2):
+        super(Eq1to2Net, self).__init__()
+        self.embed = nn.Embedding(nembed, embed_dim)
+        self.eq1to2 = Eq1to2(embed_dim, hid_dim)
+        self.fc_out = nn.Linear(2 * hid_dim, num_classes)
+
+    def forward(self, x1, mask1, x2, mask2):
+        embed1 = F.relu(self.embed(x1))
+        embed2 = F.relu(self.embed(x2))
+        eq1_pair = F.relu(self.eq1to2(embed1) * mask1)
+        eq2_pair = F.relu(self.eq1to2(embed2) * mask2)
+        pair_embed = torch.hstack([eq1_pair.sum(axis=(-1, -2)), eq2_pair.sum(axis=-1, -2)])
+        return self.fc_out(pair_embed)
+
 def main(args):
     torch.random.manual_seed(args.seed)
     device = torch.device("cuda:0" if args.cuda else "cpu")
