@@ -26,9 +26,24 @@ class Dataset(torch.utils.data.Dataset):
   def __getitem__(self, idx):
         'Generates one sample of data'
         # Select sample
-        X = self.Xs[idx, :, :4]
+        X = self.Xs[idx]
         y = self.ys[idx]
         return X, y
+
+class DataWithMask(Dataset):
+    def __init__(self, Xs, X_masks, ys):
+        self.Xs = Xs
+        self.ys = ys
+        self.X_masks = X_masks
+
+    def __len__(self):
+        return len(self.Xs)
+
+    def __getitem__(self, idx):
+        X = self.Xs[idx]
+        y = self.ys[idx]
+        X_mask = self.X_masks[idx]
+        return X, X_mask, y
 
 def main():
     fn = 'dota2Test.pkl'
@@ -37,5 +52,6 @@ def main():
     dataloader = DataLoader(data, batch_size=64, shuffle=True)
     for xbatch, ybatch in dataloader:
         pdb.set_trace()
+
 if __name__ == '__main__':
     main()

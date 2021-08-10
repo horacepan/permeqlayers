@@ -43,22 +43,8 @@ class BaselineEmbedDeepSets(nn.Module):
         sets = torch.hstack([set1, set2])
         return self.fc_out(sets)
 
-class Eq1to2Net(nn.Module):
-    def __init__(self, nembed, embed_dim, hid_dim, num_classes=2):
-        super(Eq1to2Net, self).__init__()
-        self.embed = nn.Embedding(nembed, embed_dim)
-        self.eq1to2 = Eq1to2(embed_dim, hid_dim)
-        self.fc_out = nn.Linear(2 * hid_dim, num_classes)
-
-    def forward(self, x1, mask1, x2, mask2):
-        embed1 = F.relu(self.embed(x1))
-        embed2 = F.relu(self.embed(x2))
-        eq1_pair = F.relu(self.eq1to2(embed1) * mask1)
-        eq2_pair = F.relu(self.eq1to2(embed2) * mask2)
-        pair_embed = torch.hstack([eq1_pair.sum(axis=(-1, -2)), eq2_pair.sum(axis=-1, -2)])
-        return self.fc_out(pair_embed)
-
 def main(args):
+    print(args)
     torch.random.manual_seed(args.seed)
     device = torch.device("cuda:0" if args.cuda else "cpu")
     test_fn = 'dota2Test.pkl'
@@ -84,7 +70,7 @@ def main(args):
     running_acc = 0
     st = time.time()
 
-    for e in range(args.epochs):
+    for e in range(args.epochs + 1):
         for xbatch, ybatch in train_dataloader:
             opt.zero_grad()
             xbatch, ybatch = xbatch.to(device), ybatch.to(device)
@@ -105,12 +91,13 @@ def main(args):
                     correct += (predicted == ytb).sum().item()
                 acc = correct / len(test_data)
 
-                print('Num updates: {:5d} | Running Loss: {:.3f} | Running acc: {:.3f} | Test Acc: {:.3f} | Time: {:.2f}mins'.format(
-                    nupdates, running_loss, running_acc, acc, (time.time() - st) / 60.
+                print('Epoch: {:4d} | Num updates: {:5d} | Running Loss: {:.3f} | Running acc: {:.3f} | Test Acc: {:.3f} | Time: {:.2f}mins'.format(
+                    e, nupdates, running_loss, running_acc, acc, (time.time() - st) / 60.
                 ))
                 running_loss = 0
                 running_acc = 0
             nupdates += 1
+    print('hdim: {:3d} | edim: {:3d} | final test acc: {:.3f}'.format(args.hid_dim, args.embed_dim, acc))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
