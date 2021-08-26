@@ -1,3 +1,4 @@
+cd ../
 seed=5
 for mod in Eq1to2Combo  BaselineEmbedDeepSets #Eq1to2Set
 do

@@ -1,3 +1,4 @@
+cd ../
 model=BaselineEmbedDeepSets
 for hdim in 2 4 8 16
 do
