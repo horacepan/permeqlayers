@@ -66,7 +66,7 @@ class DataWithMask(Dataset):
         return X, X_mask, y
 
 def main():
-    fn = 'dota2Train.pkl'
+    fn = './data/dota2/dota2Train.pkl'
     X, y = load(fn)
     data = Dataset(X, y)
     dataloader = DataLoader(data, batch_size=64, shuffle=True)

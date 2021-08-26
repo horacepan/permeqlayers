@@ -146,8 +146,8 @@ def main(args):
     print(args)
     torch.random.manual_seed(args.seed)
     device = torch.device("cuda:0" if args.cuda else "cpu")
-    train_fn = 'dota2Train.pkl'
-    test_fn = 'dota2Test.pkl'
+    train_fn = './data/dota2/dota2Train.pkl'
+    test_fn = './data/dota2/dota2Test.pkl'
     print('Training on: {} | Train file: {} | Test file: {}'.format(
         device, train_fn, test_fn))
 

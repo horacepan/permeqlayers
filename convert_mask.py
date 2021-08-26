@@ -39,7 +39,7 @@ def main(fn):
     print('done saving sparse mask: {}'.format(fn))
 
 if __name__ == '__main__':
-    test_fn = 'dota2Test.pkl'
-    train_fn = 'dota2Train.pkl'
+    test_fn = './data/dota2/dota2Test.pkl'
+    train_fn = './data/dota2/dota2Train.pkl'
     main(test_fn)
     main(train_fn)

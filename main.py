@@ -47,8 +47,8 @@ def main(args):
     print(args)
     torch.random.manual_seed(args.seed)
     device = torch.device("cuda:0" if args.cuda else "cpu")
-    test_fn = 'dota2Test.pkl'
-    train_fn = 'dota2Train.pkl'
+    test_fn = './data/dota2/dota2Test.pkl'
+    train_fn = './data/dota2/dota2Train.pkl'
 
     Xtrain, ytrain = load(train_fn)
     Xtest, ytest = load(test_fn)

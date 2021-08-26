@@ -1,7 +1,8 @@
-for hdim in 8 12 16
+model=BaselineEmbedDeepSets
+for hdim in 2 4 8 16
 do
-    for edim in 64 32 24 16 8 4 2
+    for edim in 64 32
     do
-        python main.py --cuda --hid_dim $hdim --embed_dim $edim --lr 0.001 --epochs 880 --print_update 5000
+        python main_mask.py --model $model --cuda --hid_dim $hdim --embed_dim $edim --lr 0.001 --epochs 300 --print_update 1000
     done
 done
