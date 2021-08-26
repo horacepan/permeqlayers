@@ -35,12 +35,20 @@ def _get_drug_categories(df):
     dosages = drugs.apply(lambda x: tuple(int(s[-1]) for s in x))
     entities = drugs.apply(lambda x: tuple(s[:-1] for s in x))
 
-    drugs = np.zeros((len(entities), 5))
+    drugs = np.zeros((len(entities), 5), dtype=int)
     for row_id, (ent_row, dose_row) in enumerate(zip(entities, dosages)):
         drugs[row_id, :len(ent_row)] = [3 * (PrevalenceDataset.drug_cat_map[drug] - 1) + d for drug, d in zip(ent_row, dose_row)]
 
     return drugs
 
+def _get_bow(cats, num_ents):
+    bow = np.zeros((cats.shape[0], num_ents))
+
+    for idx, row in enumerate(cats):
+        bow[idx, row] = 1
+
+    bow[:, 0] = 0
+    return bow
 
 class PrevalenceDataset(torch.utils.data.Dataset):
     '''
@@ -112,12 +120,30 @@ class PrevalenceCategoricalDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         return self.drugs[idx], self.ys[idx]
 
+class PrevalenceBowDataset(torch.utils.data.Dataset):
+    num_entities = 24
+    def __init__(self, fn, agg='median'):
+        df = _load_df(fn, agg=agg)
+        drug_cats = _get_drug_categories(df)
+        self.bow = _get_bow(drug_cats, PrevalenceBowDataset.num_entities + 1)
+        self.ys = df['value'].values
+
+    def __len__(self):
+        return len(self.bow)
+
+    def __getitem__(self, idx):
+        return self.bow[idx], self.ys[idx]
+
 if __name__ == '__main__':
     fn = './data/parsed_deduped.csv'
     save_fn = './data/prevalence_dataset.pkl'
     st = time.time()
-    data = PrevalenceDataset(fn, agg='median')
+    #data = PrevalenceDataset(fn, agg='median')
     end = time.time()
     print('Load df time: {:.2f}s'.format(end - st))
-    other = PrevalenceCategoricalDataset(fn)
+
+    st = time.time()
+    bow = PrevalenceBowDataset(fn)
+    end = time.time()
+    print('Load df time: {:.2f}s'.format(end - st))
     pdb.set_trace()
