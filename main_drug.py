@@ -15,7 +15,7 @@ from dataloader import Dataset, DataWithMask, BowDataset
 from models import DeepSets
 
 class BaselineDeepSetsFeatCat(nn.Module):
-    def __init__(self, nembed, embed_dim, hid_dim, num_classes=2):
+    def __init__(self, nembed, embed_dim, hid_dim):
         super(BaselineDeepSetsFeatCat, self).__init__()
         self.embed = nn.Embedding(nembed, embed_dim)
         self.set_embed = DeepSets(embed_dim + 1, hid_dim, hid_dim) # catted a feature
@@ -27,23 +27,36 @@ class BaselineDeepSetsFeatCat(nn.Module):
         set_embed = F.relu(self.set_embed(embed_catted))
         return self.fc_out(set_embed)
 
+    def eval_batch(self, batch, device):
+        drugs, doses, ys = batch
+        drugs = drugs.to(device)
+        doses = doses.to(device)
+        ys = ys.to(device)
+        return sef.forward(drugs, doses)
+
 class CatEmbedDeepSets(nn.Module):
-    def __init__(self, nembed, embed_dim, hid_dim, num_classes=2):
-        super(BaselineDeepSetsFeatCat, self).__init__()
+    def __init__(self, nembed, embed_dim, hid_dim):
+        super(CatEmbedDeepSets, self).__init__()
         self.embed = nn.Embedding(nembed, embed_dim)
-        self.set_embed = DeepSets(embed_dim + 1, hid_dim, hid_dim) # catted a feature
+        self.set_embed = DeepSets(embed_dim, hid_dim, hid_dim) # catted a feature
         self.fc_out = nn.Linear(hid_dim, 1)
 
-    def forward(self, xcat, xfeat):
+    def forward(self, xcat):
         embed = F.relu(self.embed(xcat))
-        set_embed = F.relu(self.set_embed(embed_catted))
+        set_embed = F.relu(self.set_embed(embed))
         return self.fc_out(set_embed)
+
+    def eval_batch(self, batch, device):
+        xs, ys = batch
+        xs = xs.to(device)
+        ys = ys.to(device)
+        return sef.forward(xs)
 
 def main(args):
     print(args)
     torch.random.manual_seed(args.seed)
     device = torch.device("cuda:0" if args.cuda else "cpu")
-    params = {'batch_size': args.batch_size, 'shuffle': True, 'pin_memory': True, 'num_workers': 2}
+    params = {'batch_size': args.batch_size, 'shuffle': True, 'num_workers': 2}
 
     if args.data== 'normal':
         train_data = PrevalenceDataset(args.train_fn)
@@ -91,6 +104,8 @@ def main(args):
                 ))
         nupdates += 1
 
+    if args.save_fn:
+        torch.save(model.state_dict(), args.save_fn)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -106,5 +121,6 @@ if __name__ == '__main__':
     parser.add_argument('--train_fn', type=str, default='./data/prevalence/prevalence_train.csv')
     parser.add_argument('--test_fn', type=str, default='./data/prevalence/prevalence_test.csv')
     parser.add_argument('--data', type=str, default='normal')
+    parser.add_argument('--save_fn', type=str, default='')
     args = parser.parse_args()
     main(args)
