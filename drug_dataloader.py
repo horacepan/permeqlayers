@@ -28,7 +28,7 @@ def _get_drug_doses(df):
         drugs[row_id, :len(ent_row)] = [PrevalenceDataset.drug_cat_map[drug] for drug in ent_row]
         doses[row_id, :len(dose_row)] = [PrevalenceDataset.dose_amounts[drug][d] for drug, d in zip(ent_row, dose_row)]
 
-    return drugs, doses
+    return torch.IntTensor(drugs), torch.FloatTensor(doses)
 
 def _get_drug_categories(df):
     drugs = df['combo'].apply(lambda x: x.split('-'))
@@ -39,7 +39,7 @@ def _get_drug_categories(df):
     for row_id, (ent_row, dose_row) in enumerate(zip(entities, dosages)):
         drugs[row_id, :len(ent_row)] = [3 * (PrevalenceDataset.drug_cat_map[drug] - 1) + d for drug, d in zip(ent_row, dose_row)]
 
-    return drugs
+    return torch.IntTensor(drugs)
 
 def _get_bow(cats, num_ents):
     bow = np.zeros((cats.shape[0], num_ents))
@@ -48,13 +48,14 @@ def _get_bow(cats, num_ents):
         bow[idx, row] = 1
 
     bow[:, 0] = 0
-    return bow
+    return torch.IntTensor(bow)
 
 class PrevalenceDataset(torch.utils.data.Dataset):
     '''
     Prevalence dataset spits out: one hot categorical variables of the drug
     identity as well as a continous variable for the concentration
     '''
+    num_entities = 8
     drug_cat_map = {
         'AMP': 1,
         'CPR': 2,
@@ -83,7 +84,7 @@ class PrevalenceDataset(torch.utils.data.Dataset):
         drug_doses = _get_drug_doses(df)
         self.drugs = drug_doses[0]
         self.doses = drug_doses[1]
-        self.ys = df['value'].values
+        self.ys = torch.FloatTensor(df['value'].values).reshape(-1, 1)
 
     def __len__(self):
         return len(self.drugs)
@@ -112,7 +113,7 @@ class PrevalenceCategoricalDataset(torch.utils.data.Dataset):
     def __init__(self, fn, agg='median'):
         df = _load_df(fn, agg=agg)
         self.drugs = _get_drug_categories(df)
-        self.ys = df['value'].values
+        self.ys = torch.FloatTensor(df['value'].values).reshape(-1, 1)
 
     def __len__(self):
         return len(self.drugs)
@@ -126,7 +127,7 @@ class PrevalenceBowDataset(torch.utils.data.Dataset):
         df = _load_df(fn, agg=agg)
         drug_cats = _get_drug_categories(df)
         self.bow = _get_bow(drug_cats, PrevalenceBowDataset.num_entities + 1)
-        self.ys = df['value'].values
+        self.ys = torch.FloatTensor(df['value'].values).reshape(-1, 1)
 
     def __len__(self):
         return len(self.bow)
@@ -135,8 +136,8 @@ class PrevalenceBowDataset(torch.utils.data.Dataset):
         return self.bow[idx], self.ys[idx]
 
 if __name__ == '__main__':
-    fn = './data/parsed_deduped.csv'
-    save_fn = './data/prevalence_dataset.pkl'
+    fn = './data/prevalence/parsed_deduped.csv'
+    save_fn = './data/prevalence/prevalence_dataset.pkl'
     st = time.time()
     #data = PrevalenceDataset(fn, agg='median')
     end = time.time()

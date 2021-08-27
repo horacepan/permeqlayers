@@ -1,0 +1,35 @@
+area_pdf.pkl
+- pkl file containing a list of each page's dataframe
+
+small.pkl
+- same as area_pdf but only the first 7 or so pages for easy testing
+
+parse.py
+- file that parses the pdf file of the raw data
+
+parsed.csv
+- csv of everything directly parsed from the prevalence pdf file
+
+parsed_deduped.csv
+- csv of all unique drug combinations
+
+split.py
+- splits parsed_deduped.csv into train/test csvs
+
+prevalence_dataset.pkl
+- pickle file of a dictionary of 'drug'->one hot categories, 'dose'->floats, 'ys': target value(median agg)
+
+prevalence_train.csv
+prevalence_test.csv
+- result of split.py on parsed_deduped.csv
+
+Results:
+params = {
+            'n_estimators': 300,
+            'min_samples_leaf': 5,
+            'min_samples_split': 2,
+            'max_depth': 16,
+            'n_jobs': -1
+}
+rf_eval(x_train, y_train, x_val, y_val, params)
+
