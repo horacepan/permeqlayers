@@ -3,6 +3,7 @@ import pickle
 import time
 import argparse
 from tqdm import tqdm
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -15,7 +16,7 @@ from dataloader import Dataset, DataWithMask, BowDataset
 from models import DeepSets
 
 class BaselineDeepSetsFeatCat(nn.Module):
-    def __init__(self, nembed, embed_dim, hid_dim):
+    def __init__(self, nembed, embed_dim, hid_dim, nlayers=1):
         super(BaselineDeepSetsFeatCat, self).__init__()
         self.embed = nn.Embedding(nembed, embed_dim)
         self.set_embed = DeepSets(embed_dim + 1, hid_dim, hid_dim) # catted a feature
@@ -27,12 +28,11 @@ class BaselineDeepSetsFeatCat(nn.Module):
         set_embed = F.relu(self.set_embed(embed_catted))
         return self.fc_out(set_embed)
 
-    def eval_batch(self, batch, device):
-        drugs, doses, ys = batch
-        drugs = drugs.to(device)
-        doses = doses.to(device)
-        ys = ys.to(device)
-        return sef.forward(drugs, doses)
+    def pred_batch(self, batch, device):
+        xcat, xfeat, _ = batch
+        xcat = xcat.to(device)
+        xfeat = xfeat.to(device)
+        return self.forward(xcat, xfeat)
 
 class CatEmbedDeepSets(nn.Module):
     def __init__(self, nembed, embed_dim, hid_dim):
@@ -46,61 +46,68 @@ class CatEmbedDeepSets(nn.Module):
         set_embed = F.relu(self.set_embed(embed))
         return self.fc_out(set_embed)
 
-    def eval_batch(self, batch, device):
-        xs, ys = batch
+    def pred_batch(self, batch, device):
+        xs, _ = batch
         xs = xs.to(device)
-        ys = ys.to(device)
-        return sef.forward(xs)
+        return self.forward(xs)
 
 def main(args):
     print(args)
     torch.random.manual_seed(args.seed)
     device = torch.device("cuda:0" if args.cuda else "cpu")
-    params = {'batch_size': args.batch_size, 'shuffle': True, 'num_workers': 2}
+    params = {'batch_size': args.batch_size, 'shuffle': True, 'pin_memory': True}
 
     if args.data== 'normal':
         train_data = PrevalenceDataset(args.train_fn)
         val_data = PrevalenceDataset(args.train_fn)
         test_data = PrevalenceDataset(args.test_fn)
+        model = BaselineDeepSetsFeatCat(train_data.num_entities + 1, args.embed_dim, args.hid_dim).to(device)
     elif args.data == 'allcat':
+        print('Using all categorical')
         train_data = PrevalenceCategoricalDataset(args.train_fn)
         val_data =   PrevalenceCategoricalDataset(args.train_fn)
         test_data =  PrevalenceCategoricalDataset(args.test_fn)
+        model = CatEmbedDeepSets(train_data.num_entities + 1, args.embed_dim, args.hid_dim).to(device)
 
     train_dataloader = DataLoader(train_data, **params)
     val_dataloader = DataLoader(val_data, **params)
     test_dataloader = DataLoader(test_data, **params)
 
     loss_func = nn.MSELoss()
-    model = BaselineDeepSetsFeatCat(train_data.num_entities + 1, args.embed_dim, args.hid_dim).to(device)
     opt= torch.optim.Adam(model.parameters(), lr=args.lr)
     nupdates = 0
     st = time.time()
+    losses = []
+    maes = []
 
     for e in range(args.epochs+ 1):
-        for xcat, xfeat, ybatch in train_dataloader:
+        #for xcat, xfeat, ybatch in train_dataloader:
+        for batch in train_dataloader:
             opt.zero_grad()
-            xcat, xfeat, ybatch = xcat.to(device), xfeat.to(device), ybatch.to(device)
-            ypred = model(xcat, xfeat)
+            ybatch = batch[-1].to(device)
+            ypred = model.pred_batch(batch, device)
             loss = loss_func(ybatch, ypred)
+            batch_mae = (ypred - ybatch).abs().mean().item()
             loss.backward()
             opt.step()
+            losses.append(loss.item())
+            maes.append(batch_mae)
 
         if nupdates % args.print_update == 0:
             tot_se = 0
             tot_ae = 0
             with torch.no_grad():
-                for _xcat, _xfeat, _ybatch in test_dataloader:
-                    _xcat, _xfeat, _ybatch = _xcat.to(device), _xfeat.to(device), _ybatch.to(device)
-                    _ypred = model(_xcat, _xfeat)
+                #for _xcat, _xfeat, _ybatch in test_dataloader:
+                for _batch in test_dataloader:
+                    _ybatch = _batch[-1].to(device)
+                    _ypred = model.pred_batch(_batch, device)
                     _loss  = loss_func(_ybatch, _ypred)
-                    tot_se += (_loss.item() * len(_xcat))
+                    tot_se += (_loss.item() * len(_ybatch))
                     tot_ae += (_ypred - _ybatch).abs().sum().item()
                 tot_mse = tot_se / len(test_data)
                 tot_mae = tot_ae / len(test_data)
-                last_mae = (ypred- ybatch).abs().sum().item() / len(ybatch)
-                print('Epoch: {:4d} | Num updates: {:5d} | Last batch mae: {:.3f}, mse: {:.3f} | Tot test mae: {:.3f} | Tot test mse: {:.3f} | Time: {:.2f}mins'.format(
-                    e, nupdates, last_mae, loss.item(), tot_mae, tot_mse, (time.time() - st) / 60.
+                print('Epoch: {:4d} | Num updates: {:5d} | Last 100 updates: {:.3f}, mse: {:.3f} | Tot test mae: {:.3f} | Tot test mse: {:.3f} | Time: {:.2f}mins'.format(
+                    e, nupdates, np.mean(maes[-100:]), np.mean(losses[-100:]), tot_mae, tot_mse, (time.time() - st) / 60.
                 ))
         nupdates += 1
 
