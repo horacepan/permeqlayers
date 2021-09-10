@@ -101,6 +101,58 @@ def ops_2_to_2(inputs, normalize=False):
             ops[i] = torch.divide(op, dim)
     return ops[1:]
 
+def set_ops_3_to_3(inputs, normalize=False):
+    N, D, m, m, m = inputs.shape
+    dim = inputs.shape[-1]
+
+    # only care about marginalizing over each of the individual indices
+    sum_all = inputs.sum(dim=(-1, -2, -3))
+    sum_c1 = inputs.sum(dim=-1)
+    sum_c2 = inputs.sum(dim=-2)
+    sum_c3 = inputs.sum(dim=-3)
+
+    sum_c12 = inputs.sum(dim=(-1, -2))
+    sum_c13 = inputs.sum(dim=(-1, -3))
+    sum_c23 = inputs.sum(dim=(-2, -3))
+
+    # dont really care about diagonal
+    ops = [None] * 20
+    ops[1] = torch.tile(sum_all.view(N, D, 1, 1, 1), (1, 1, dim, dim, dim))
+
+    ops[2] = torch.tile(sum_c1.unsqueeze(-1), (1, 1, 1, 1, m))
+    ops[3] = torch.tile(sum_c1.unsqueeze(-2), (1, 1, 1, m, 1))
+    ops[4] = torch.tile(sum_c1.unsqueeze(-3), (1, 1, m, 1, 1))
+
+    ops[5] = torch.tile(sum_c2.unsqueeze(-1), (1, 1, 1, 1, m))
+    ops[6] = torch.tile(sum_c2.unsqueeze(-2), (1, 1, 1, m, 1))
+    ops[7] = torch.tile(sum_c2.unsqueeze(-3), (1, 1, m, 1, 1))
+
+    ops[8]  = torch.tile(sum_c3.unsqueeze(-1), (1, 1, 1, 1, m))
+    ops[9] = torch.tile(sum_c3.unsqueeze(-2), (1, 1, 1, m, 1))
+    ops[10] = torch.tile(sum_c3.unsqueeze(-3), (1, 1, m, 1, 1))
+
+    ops[11] = torch.tile(sum_c12.view(N, D, m, 1, 1), (1, 1, 1, m, m))
+    ops[12] = torch.tile(sum_c12.view(N, D, 1, m, 1), (1, 1, m, 1, m))
+    ops[13] = torch.tile(sum_c12.view(N, D, 1, 1, m), (1, 1, m, m, 1))
+
+    ops[14] = torch.tile(sum_c13.view(N, D, m, 1, 1), (1, 1, 1, m, m))
+    ops[15] = torch.tile(sum_c13.view(N, D, 1, m, 1), (1, 1, m, 1, m))
+    ops[16] = torch.tile(sum_c13.view(N, D, 1, 1, m), (1, 1, m, m, 1))
+
+    ops[17] = torch.tile(sum_c23.view(N, D, m, 1, 1), (1, 1, 1, m, m))
+    ops[18] = torch.tile(sum_c23.view(N, D, 1, m, 1), (1, 1, m, 1, m))
+    ops[19] = torch.tile(sum_c23.view(N, D, 1, 1, m), (1, 1, m, m, 1))
+
+    if normalize:
+        ops[1] = torch.divide(ops[1], dim * dim * dim)
+        for d in range(2, 11):
+            ops[d] = torch.divide(ops[d], dim)
+
+        for d in range(11, 20):
+            ops[d] = torch.divide(ops[d], dim * dim)
+
+    return ops[1:]
+
 if __name__ == '__main__':
     N = 32
     D = 16
