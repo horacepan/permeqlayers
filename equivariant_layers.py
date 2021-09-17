@@ -153,13 +153,71 @@ def set_ops_3_to_3(inputs, normalize=False):
 
     return ops[1:]
 
+
+def set_ops_4_to_4(inputs):
+    N, D, m, _, _, _ = inputs.shape
+    sum_all = inputs.sum(dim=(-1, -2, -3, -4))
+    c1, c2, c3 = [], [], []
+
+    # collapse 1 dim
+    sum_c1 = inputs.sum(dim=-1)
+    sum_c2 = inputs.sum(dim=-2)
+    sum_c3 = inputs.sum(dim=-3)
+    sum_c4 = inputs.sum(dim=-4)
+    c1s = [sum_c1, sum_c2, sum_c3, sum_c4]
+
+    # collapse 2
+    sum_c12 = inputs.sum(dim=(-1, -2))
+    sum_c13 = inputs.sum(dim=(-1, -3))
+    sum_c14 = inputs.sum(dim=(-1, -4))
+    sum_c23 = inputs.sum(dim=(-2, -3))
+    sum_c24 = inputs.sum(dim=(-2, -4))
+    sum_c34 = inputs.sum(dim=(-3, -4))
+    c2s = [sum_c12, sum_c13, sum_c14, sum_c23, sum_c24, sum_c34]
+
+    # collapse 3
+    sum_c123 = inputs.sum(dim=(-1, -2, -3))
+    sum_c124 = inputs.sum(dim=(-1, -2, -4))
+    sum_c134 = inputs.sum(dim=(-1, -3, -4))
+    sum_c234 = inputs.sum(dim=(-2, -3, -4))
+    c3s = [sum_c123, sum_c124, sum_c134, sum_c234]
+
+    # broadcast
+    ops = []
+    ops.append(torch.tile(sum_all.view(N, D, 1, 1, 1, 1), (1, 1, m, m, m, m)))
+
+    # broadcast collapsed 1 dims
+    for c1 in c1s:
+        ops.append(torch.tile(c1.view(N, D, m, m, m, 1), (1, 1, 1, 1, 1, m)))
+        ops.append(torch.tile(c1.view(N, D, m, m, 1, m), (1, 1, 1, 1, m, 1)))
+        ops.append(torch.tile(c1.view(N, D, m, 1, m, m), (1, 1, 1, m, 1, 1)))
+        ops.append(torch.tile(c1.view(N, D, 1, m, m, m), (1, 1, m, 1, 1, 1)))
+
+    for c2 in c2s:
+        ops.append(torch.tile(c2.view(N, D, m, m, 1, 1), (1, 1, 1, 1, m, m)))
+        ops.append(torch.tile(c2.view(N, D, m, 1, m, 1), (1, 1, 1, m, 1, m)))
+        ops.append(torch.tile(c2.view(N, D, 1, m, m, 1), (1, 1, m, 1, 1, m)))
+        ops.append(torch.tile(c2.view(N, D, m, 1, 1, m), (1, 1, 1, m, m, 1)))
+        ops.append(torch.tile(c2.view(N, D, 1, m, 1, m), (1, 1, m, 1, m, 1)))
+        ops.append(torch.tile(c2.view(N, D, 1, 1, m, m), (1, 1, m, m, 1, 1)))
+
+    for c3 in c3s:
+        ops.append(torch.tile(c3.view(N, D, m, 1, 1, 1), (1, 1, 1, m, m, m)))
+        ops.append(torch.tile(c3.view(N, D, 1, m, 1, 1), (1, 1, m, 1, m, m)))
+        ops.append(torch.tile(c3.view(N, D, 1, 1, m, 1), (1, 1, m, m, 1, m)))
+        ops.append(torch.tile(c3.view(N, D, 1, 1, 1, m), (1, 1, m, m, m, 1)))
+
+    return ops
+
 if __name__ == '__main__':
     N = 32
     D = 16
-    m = 7
+    m = 2
     x = torch.rand(N, D, m)
     x = torch.rand(N, D, m)
     x2 = torch.rand(N, D, m, m)
+    x3 = torch.rand(N, D, m, m, m)
+    x4 = torch.rand(N, D, m, m, m, m)
     o = ops_1_to_1(x)
     print('1->1 okay')
     o2 = ops_1_to_2(x)
@@ -168,3 +226,12 @@ if __name__ == '__main__':
     print('2->1 okay')
     o22 = ops_2_to_2(x2)
     print('2->2 okay')
+
+    o33 = set_ops_3_to_3(x3)
+    t33 = torch.stack(o33, dim=2)
+    print(t33.shape)
+
+    o44 = set_ops_4_to_4(x4)
+    t44 = torch.stack(o44, dim=2)
+    print(t44.shape)
+    pdb.set_trace()

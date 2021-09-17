@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from models import MLP
-from equivariant_layers import ops_2_to_1, ops_1_to_2, ops_1_to_1, ops_2_to_2, set_ops_3_to_3
+from equivariant_layers import ops_2_to_1, ops_1_to_2, ops_1_to_1, ops_2_to_2, set_ops_3_to_3, set_ops_4_to_4
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 class Eq2to1(nn.Module):
@@ -127,8 +127,23 @@ class SetEq3to3(nn.Module):
 
     def forward(self, x):
         ops = torch.stack(set_ops_3_to_3(x), dim=2)
-        print(ops.shape)
         output = torch.einsum('dsb,ndbijk->nsijk', self.coefs, ops) # in/out/basis, batch/in/basis/ijk
+        output = output + self.bias
+        return output
+
+class SetEq4to4(nn.Module):
+    def __init__(self, in_dim, out_dim):
+        super(SetEq4to4, self).__init__()
+        self.basis_dim = 69
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.coefs = nn.Parameter(torch.normal(0, np.sqrt(2.0 / (in_dim + out_dim)),
+                                  (in_dim, out_dim, self.basis_dim)))
+        self.bias = nn.Parameter(torch.zeros(1, out_dim, 1, 1, 1, 1))
+
+    def forward(self, x):
+        ops = torch.stack(set_ops_4_to_4(x), dim=2)
+        output = torch.einsum('dsb,ndbijkl->nsijkl', self.coefs, ops) # in/out/basis, batch/in/basis/ijk
         output = output + self.bias
         return output
 
@@ -148,16 +163,36 @@ class SetNet3to3(nn.Module):
         '''
         for layer in self.layers:
             x = F.relu(layer(x))
-        x = x.permute(0, 2, 3, 4, 1)
+        x = x.permute(0, 2, 3, 4, 5, 1)
         output = self.out_net(x)
         return output
+
+class SetNet4to4(nn.Module):
+    def __init__(self, layers, out_dim, out_model='Linear'):
+        super(Net3to3, self).__init__()
+        self.layers = nn.ModuleList([SetEq3to3(din, dout) for din, dout in layers])
+        if out_model == 'Linear':
+            self.out_net = nn.Linear(layers[-1][1], out_dim)
+        else:
+            self.out_net = MLP(layers[-1][1], out_dim)
+
+    def forward(self, x):
+        '''
+        x: tensor of size Batch x feature x n x n x n
+        Return: tensor of size Batch x n x n x n
+        '''
+        for layer in self.layers:
+            x = F.relu(layer(x))
+        x = x.permute(0, 2, 3, 4, 1)
+        output = self.out_net(x)
 
 if __name__ == '__main__':
     N = 10
     d_in = 5
     d_hid = 3
     d_out = 1
-    m = 7
+    m = 2
+    x4 = torch.rand(N, d_in, m, m, m, m)
     x3 = torch.rand(N, d_in, m, m, m)
     x2 = torch.rand(N, d_in, m, m)
     x1 = torch.rand(N, d_in, m)
@@ -177,3 +212,5 @@ if __name__ == '__main__':
 
     m33 = SetEq3to3(d_in, d_hid)
     print(m33(x3).shape, f'expect {N} x {d_hid} x {m} x {m} x {m}')
+    m44 = SetEq4to4(d_in, d_hid)
+    print(m44(x4).shape, f'expect {N} x {d_hid} x {m} x {m} x {m}, {m}')
