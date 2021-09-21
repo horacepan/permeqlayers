@@ -143,33 +143,14 @@ class SetEq4to4(nn.Module):
 
     def forward(self, x):
         ops = torch.stack(set_ops_4_to_4(x), dim=2)
+        pdb.set_trace()
         output = torch.einsum('dsb,ndbijkl->nsijkl', self.coefs, ops) # in/out/basis, batch/in/basis/ijk
         output = output + self.bias
         return output
 
 class SetNet3to3(nn.Module):
     def __init__(self, layers, out_dim, out_model='Linear'):
-        super(Net3to3, self).__init__()
-        self.layers = nn.ModuleList([SetEq3to3(din, dout) for din, dout in layers])
-        if out_model == 'Linear':
-            self.out_net = nn.Linear(layers[-1][1], out_dim)
-        else:
-            self.out_net = MLP(layers[-1][1], out_dim)
-
-    def forward(self, x):
-        '''
-        x: tensor of size Batch x feature x n x n x n
-        Return: tensor of size Batch x n x n x n
-        '''
-        for layer in self.layers:
-            x = F.relu(layer(x))
-        x = x.permute(0, 2, 3, 4, 5, 1)
-        output = self.out_net(x)
-        return output
-
-class SetNet4to4(nn.Module):
-    def __init__(self, layers, out_dim, out_model='Linear'):
-        super(Net3to3, self).__init__()
+        super(SetNet3to3, self).__init__()
         self.layers = nn.ModuleList([SetEq3to3(din, dout) for din, dout in layers])
         if out_model == 'Linear':
             self.out_net = nn.Linear(layers[-1][1], out_dim)
@@ -185,6 +166,27 @@ class SetNet4to4(nn.Module):
             x = F.relu(layer(x))
         x = x.permute(0, 2, 3, 4, 1)
         output = self.out_net(x)
+        return output
+
+class SetNet4to4(nn.Module):
+    def __init__(self, layers, out_dim, out_model='Linear'):
+        super(SetNet4to4, self).__init__()
+        self.layers = nn.ModuleList([SetEq4to4(din, dout) for din, dout in layers])
+        if out_model == 'Linear':
+            self.out_net = nn.Linear(layers[-1][1], out_dim)
+        else:
+            self.out_net = MLP(layers[-1][1], out_dim)
+
+    def forward(self, x):
+        '''
+        x: tensor of size Batch x feature x n x n x n
+        Return: tensor of size Batch x n x n x n
+        '''
+        for layer in self.layers:
+            x = F.relu(layer(x))
+        x = x.permute(0, 2, 3, 4, 5, 1)
+        output = self.out_net(x)
+        return output
 
 if __name__ == '__main__':
     N = 10
