@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from eq_models import Eq1to2, Eq2to2, SetNet3to3, SetNet4to4
+from eq_models import Eq1to2, Eq2to2, Net1to1, Net2to2, SetNet3to3, SetNet4to4
 from main import BaselineEmbedDeepSets
 
 from drug_dataloader import PrevalenceDataset, PrevalenceCategoricalDataset, gen_sparse_drug_data
@@ -24,18 +24,74 @@ Eq3Net and Eq4Net do the work of getting data into right format
 - feed it through 3->3/4->4 layers
 - linear layer
 '''
+def eq_model_dispatcher(n):
+    if n == 1:
+        return Eq1Net
+    elif n == 2:
+        return Eq2Net
+    elif n == 3:
+        return Eq3Net
+    elif n == 4:
+        return Eq4Net
+
+class Eq1Net(nn.Module):
+    def __init__(self, nembed, embed_dim, layers, out_dim):
+        super(Eq1Net, self).__init__()
+        self.embed_dim = embed_dim
+        self.embed = nn.Embedding(nembed, embed_dim)
+        self.eq_net = Net1to1(layers, out_dim)
+        self.out_net = nn.Linear(out_dim, 1)
+
+    def forward(self, xcat, xfeat):
+        x = self.embed(xcat)
+        x = torch.cat([x, xfeat.unsqueeze(-1)], axis=-1)
+        x = F.relu(self.eq_net(x)) # x should have dim bxnxd
+        x = self.out_net(x.sum(dim=(-2)))
+        return x
+
+    def pred_batch(self, batch, device):
+        xcat, xfeat, _ = batch
+        xcat = xcat.to(device)
+        xfeat = xfeat.to(device)
+        return self.forward(xcat, xfeat)
+
+class Eq2Net(nn.Module):
+    def __init__(self, nembed, embed_dim, layers, out_dim):
+        super(Eq2Net, self).__init__()
+        self.embed_dim = embed_dim
+        self.embed = nn.Embedding(nembed, embed_dim)
+        self.eq_net = Net2to2(layers, out_dim)
+        self.out_net = nn.Linear(out_dim, 1)
+
+    def forward(self, xcat, xfeat):
+        x = self.embed(xcat)
+        x = torch.cat([x, xfeat.unsqueeze(-1)], axis=-1)
+        x = torch.einsum('bid,bjd->bdij', x, x)
+        x = F.relu(self.eq_net(x))
+        x = self.out_net(x.sum(dim=(-3, -2)))
+        return x
+
+    def pred_batch(self, batch, device):
+        xcat, xfeat, _ = batch
+        xcat = xcat.to(device)
+        xfeat = xfeat.to(device)
+        return self.forward(xcat, xfeat)
+
 class Eq3Net(nn.Module):
-    def __init__(self, nembed, embed_dim, layers, out_dim=1):
+    def __init__(self, nembed, embed_dim, layers, out_dim):
         super(Eq3Net, self).__init__()
         self.embed_dim = embed_dim
         self.embed = nn.Embedding(nembed, embed_dim)
         self.eq_net = SetNet3to3(layers, out_dim)
+        self.out_net = nn.Linear(out_dim, 1)
 
     def forward(self, xcat, xfeat):
         x = F.relu(self.embed(xcat))
         x = torch.cat([x, xfeat.unsqueeze(-1)], axis=-1)
         x = torch.einsum('bid,bjd,bkd->bdijk', x, x, x)
-        x = self.eq_net(x)
+        x = F.relu(self.eq_net(x))
+        x = self.out_net(x.sum(dim=(-2, -3, -4)))
+        # now x is b x n x n x n x d
         return x
 
     def pred_batch(self, batch, device):
@@ -45,17 +101,19 @@ class Eq3Net(nn.Module):
         return self.forward(xcat, xfeat)
 
 class Eq4Net(nn.Module):
-    def __init__(self, nembed, embed_dim, layers, out_dim=1):
+    def __init__(self, nembed, embed_dim, layers, out_dim):
         super(Eq4Net, self).__init__()
         self.embed_dim = embed_dim
         self.embed = nn.Embedding(nembed, embed_dim)
         self.eq_net = SetNet4to4(layers, out_dim)
+        self.out_net = nn.Linear(out_dim, 1)
 
     def forward(self, xcat, xfeat):
         x = F.relu(self.embed(xcat))
         x = torch.cat([x, xfeat.unsqueeze(-1)], axis=-1)
         x = torch.einsum('bid,bjd,bkd,bld->bdijkl', x, x, x, x)
-        x = self.eq_net(x)
+        x = F.relu(self.eq_net(x))
+        x = self.out_net(x.sum(dim=(-2, -3, -4, -5)))
         return x
 
     def pred_batch(self, batch, device):
@@ -80,12 +138,18 @@ def main(args):
         test_data = PrevalenceDataset(args.test_fn)
         print(f'Train size: {len(train_data)} | Test size: {len(test_data)}')
 
-    if args.max_drugs == 3 and args.model == 'eq':
+    if args.eqn == 1 and args.model == 'eq':
+        print('1-1 model')
+        model = Eq1Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim).to(device)
+    elif args.eqn == 2 and args.model == 'eq':
+        print('2-2 model')
+        model = Eq2Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim).to(device)
+    elif args.eqn == 3 and args.model == 'eq':
         print('3-3 model')
-        model = Eq3Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers).to(device)
-    elif args.max_drugs == 4 and args.model == 'eq':
+        model = Eq3Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim).to(device)
+    elif args.eqn == 4 and args.model == 'eq':
         print('4-4 model')
-        model = Eq4Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers).to(device)
+        model = Eq4Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim).to(device)
     else:
         print('Baseline model')
         model = BaselineDeepSetsFeatCat(PrevalenceDataset.num_entities + 1,
@@ -144,6 +208,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=1024)
     parser.add_argument('--embed_dim', type=int, default=32)
     parser.add_argument('--hid_dim', type=int, default=32)
+    parser.add_argument('--out_dim', type=int, default=128)
     parser.add_argument('--num_eq_layers', type=int, default=1)
     parser.add_argument('--epochs', type=int, default=10000)
     parser.add_argument('--print_update', type=int, default=1000)
@@ -155,6 +220,7 @@ if __name__ == '__main__':
     parser.add_argument('--data', type=str, default='sparse')
     parser.add_argument('--save_fn', type=str, default='')
     parser.add_argument('--max_drugs', type=int, default=4)
+    parser.add_argument('--eqn', type=int, default=2)
     parser.add_argument('--model', type=str, default='baseline')
     args = parser.parse_args()
     main(args)

@@ -7,14 +7,30 @@ from models import MLP
 from equivariant_layers import ops_2_to_1, ops_1_to_2, ops_1_to_1, ops_2_to_2, set_ops_3_to_3, set_ops_4_to_4
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+class Eq1to1(nn.Module):
+    def __init__(self, in_dim, out_dim):
+        super(Eq1to1, self).__init__()
+        self.basis_dim = 2
+        self.out_dim = out_dim
+        self.in_dim = in_dim
+        self.coefs = nn.Parameter(torch.normal(0, np.sqrt(2. / (in_dim + out_dim)), (in_dim, out_dim, self.basis_dim)))
+        self.bias = nn.Parameter(torch.zeros(1, out_dim, 1))
+
+    def forward(self, inputs):
+        ops = ops_1_to_1(inputs)
+        ops = torch.stack(ops, dim=2)
+        output = torch.einsum('dsb, ndbi->nsi', self.coefs, ops)
+        output = output + self.bias
+        return output
+
 class Eq2to1(nn.Module):
     def __init__(self, in_dim, out_dim):
         super(Eq2to1, self).__init__()
         self.basis_dim = 5
         self.out_dim = out_dim
         self.in_dim = in_dim
-        self.coefs = nn.Parameter(torch.rand(in_dim, out_dim, self.basis_dim))
-        self.bias = nn.Parameter(torch.rand(1, out_dim, 1))
+        self.coefs = nn.Parameter(torch.normal(0, np.sqrt(2. / (in_dim + out_dim)), (in_dim, out_dim, self.basis_dim)))
+        self.bias = nn.Parameter(torch.zeros(1, out_dim, 1))
 
     def forward(self, inputs):
         '''
@@ -45,7 +61,7 @@ class Eq1to2(nn.Module):
         return output
 
 class Eq2to2(nn.Module):
-    def __init__(self, in_dim, out_dim, n=23, normalize=True):
+    def __init__(self, in_dim, out_dim, normalize=True):
         super(Eq2to2, self).__init__()
         self.basis_dim = 15
         self.out_dim = out_dim
@@ -53,7 +69,8 @@ class Eq2to2(nn.Module):
         self.coefs = nn.Parameter(torch.normal(0, np.sqrt(2./ (in_dim * out_dim * self.basis_dim)), (in_dim, out_dim, self.basis_dim)))
         self.bias = nn.Parameter(torch.zeros(1, out_dim, 1, 1))
         self.diag_bias = nn.Parameter(torch.zeros(1, out_dim, 1, 1))
-        self.diag_eye = torch.eye(n).unsqueeze(0).unsqueeze(0).to(device)
+
+        self.diag_eye = None #torch.eye(n).unsqueeze(0).unsqueeze(0).to(device)
         # mat_diag_bias = tf.multiply(tf.expand_dims(tf.expand_dims(tf.eye(tf.to_int32(tf.shape(inputs)[3])), 0), 0), diag_bias)
 
         '''
@@ -66,6 +83,10 @@ class Eq2to2(nn.Module):
         ops = ops_2_to_2(inputs)
         ops = torch.stack(ops, dim=2)
         output = torch.einsum('dsb,ndbij->nsij', self.coefs, ops)
+
+        n = output.shape[-1]
+        if self.diag_eye is None:
+            self.diag_eye = torch.eye(n).unsqueeze(0).unsqueeze(0).to(device)
         diag_bias = self.diag_eye.multiply(self.diag_bias)
         output = output + self.bias + diag_bias
         return output
@@ -89,15 +110,32 @@ class Eq1to2Net(nn.Module):
         output = self.fc_out(output)
         return output
 
+class Net1to1(nn.Module):
+    def __init__(self, layers, out_dim, out_model='linear'):
+        super(Net1to1, self).__init__()
+        self.layers = nn.ModuleList([Eq1to1(din, dout) for din, dout in layers])
+        if out_model == 'linear':
+            self.out_net = nn.Linear(layers[-1][-1], out_dim)
+        else:
+            self.out_net = MLP(layers[-1][-1], out_dim)
+
+    def forward(self, x):
+        for layer in self.layers:
+            print('x shape:', x.shape)
+            x = F.relu(layer(x))
+        x = x.permute(0, 2, 1)
+        output = self.out_net(x)
+        return output
+
 class Net2to2(nn.Module):
-    def __init__(self, layers, out_dim, n, out_model='Linear', **kwargs):
+    def __init__(self, layers, out_dim, out_model='Linear', **kwargs):
         '''
         layers: list of tuples (dim_in, dim_out)
         out_dim: output dimension
         n: size of input n \times n  tensor
         '''
         super(Net2to2, self).__init__()
-        self.layers = nn.ModuleList([Eq2to2(din, dout, n) for din, dout in layers])
+        self.layers = nn.ModuleList([Eq2to2(din, dout) for din, dout in layers])
         if out_model == 'Linear':
             self.out_net = nn.Linear(layers[-1][-1], out_dim)
         elif out_model=='MLP':
@@ -143,7 +181,6 @@ class SetEq4to4(nn.Module):
 
     def forward(self, x):
         ops = torch.stack(set_ops_4_to_4(x), dim=2)
-        pdb.set_trace()
         output = torch.einsum('dsb,ndbijkl->nsijkl', self.coefs, ops) # in/out/basis, batch/in/basis/ijk
         output = output + self.bias
         return output
@@ -212,6 +249,9 @@ if __name__ == '__main__':
     print(m21b(m12a(x1)).shape, f'expect {N} x 1 x {m}')
     print(net(x2).shape, 'expect dim:', f'{N} x {m} x {m} x {out_dim}')
 
+    n11 = Net1to1(layers, out_dim)
+    x11 = torch.rand(N, d_in, m)
+    print(n11(x11), '1->1')
     m33 = SetEq3to3(d_in, d_hid)
     print(m33(x3).shape, f'expect {N} x {d_hid} x {m} x {m} x {m}')
     m44 = SetEq4to4(d_in, d_hid)

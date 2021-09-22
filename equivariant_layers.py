@@ -14,11 +14,7 @@ def ops_1_to_1(inputs, normalize=False):
     dim = inputs.shape[-1]
     sums = inputs.sum(dim=2, keepdim=True)
     op1 = inputs
-    check_shape(op1, (N, d, m))
-
     op2 = torch.tile(sums, (1, 1, dim))
-    check_shape(op2, (N, d, m))
-
     return [op1, op2]
 
 def ops_1_to_2(inputs, normalize=False):
@@ -41,19 +37,10 @@ def ops_2_to_1(inputs, normalize=False):
     dim = inputs.shape[-1]
 
     diag_part = torch.diagonal(inputs, dim1=-2, dim2=-1)
-    check_shape(diag_part, (N, D, m))
-
     sum_diag_part = diag_part.sum(dim=2, keepdims=True)
-    check_shape(sum_diag_part, (N, D, 1))
-
     sum_rows = inputs.sum(dim=3)
-    check_shape(sum_rows, (N, D, m))
-
     sum_cols = inputs.sum(dim=2)
-    check_shape(sum_cols, (N, D, m))
-
     sum_all = inputs.sum(dim=(2,3))
-    check_shape(sum_all, (N, D))
 
     op1 = diag_part
     op2 = torch.tile(sum_diag_part, (1, 1, dim))
@@ -61,8 +48,6 @@ def ops_2_to_1(inputs, normalize=False):
     op4 = sum_cols
     op5 = torch.tile(sum_all.unsqueeze(2), (1, 1, dim))
     ops = [op1, op2, op3, op4, op5]
-    for idx, op in enumerate(ops):
-        check_shape(op, (N, D, m))
     return [op1, op2, op3, op4, op5]
 
 def ops_2_to_2(inputs, normalize=False):
@@ -154,7 +139,7 @@ def set_ops_3_to_3(inputs, normalize=False):
     return ops[1:]
 
 
-def set_ops_4_to_4(inputs):
+def set_ops_4_to_4(inputs, normalize=False):
     N, D, m, _, _, _ = inputs.shape
     sum_all = inputs.sum(dim=(-1, -2, -3, -4))
     c1, c2, c3 = [], [], []
