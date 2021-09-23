@@ -54,17 +54,11 @@ def eops_2_to_2(inputs, normalize=False):
     N, D, m, m = inputs.shape
     dim = inputs.shape[-1]
 
-    print('pre sums')
     diag_part = torch.diagonal(inputs, dim1=-2, dim2=-1) # N x D x m
-    print('done grab diag part')
     sum_diag_part = diag_part.sum(dim=2, keepdims=True) # N x D x 1
-    print('done sum diag part')
     sum_rows = inputs.sum(dim=3) # N x D x m
-    print('done sum row')
     sum_cols = inputs.sum(dim=2) # N x D x m
-    print('done sum cols')
     sum_all = inputs.sum(dim=(2,3)) # N x D
-    print('Post sums')
 
     ops = [None] * (15 + 1)
     ops[1]  = torch.diag_embed(diag_part) # N x D x m x m
@@ -72,12 +66,10 @@ def eops_2_to_2(inputs, normalize=False):
     ops[3]  = torch.diag_embed(sum_rows)
     ops[4]  = torch.diag_embed(sum_rows)
     ops[5]  = torch.diag_embed(sum_all.unsqueeze(-1).expand(-1, -1, dim))
-    print('post diag embeds')
     ops[6]  = sum_cols.unsqueeze(3).expand(-1, -1, -1, dim)
     ops[7]  = sum_rows.unsqueeze(3).expand(-1, -1, -1, dim)
     ops[8]  = sum_cols.unsqueeze(2).expand(-1, -1, dim, -1)
     ops[9]  = sum_rows.unsqueeze(2).expand(-1, -1, dim, -1)
-    print('post sum/row broadcasts embeds')
 
     ops[10] = inputs
     ops[11] = torch.transpose(inputs, 2, 3)
@@ -85,7 +77,6 @@ def eops_2_to_2(inputs, normalize=False):
     ops[13] = diag_part.unsqueeze(2).expand(-1, -1, dim, -1)
     ops[14] = sum_diag_part.unsqueeze(3).expand(-1, -1, dim, dim)
     ops[15] = sum_all.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, dim, dim)
-    print('post sum/row broadcasts embeds')
 
     for i in range(1, 16):
         op = ops[i]

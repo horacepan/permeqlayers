@@ -35,11 +35,11 @@ def eq_model_dispatcher(n):
         return Eq4Net
 
 class Eq1Net(nn.Module):
-    def __init__(self, nembed, embed_dim, layers, out_dim):
+    def __init__(self, nembed, embed_dim, layers, out_dim, ops_func=None):
         super(Eq1Net, self).__init__()
         self.embed_dim = embed_dim
         self.embed = nn.Embedding(nembed, embed_dim)
-        self.eq_net = Net1to1(layers, out_dim)
+        self.eq_net = Net1to1(layers, out_dim, ops_func=ops_func)
         self.out_net = nn.Linear(out_dim, 1)
 
     def forward(self, xcat, xfeat):
@@ -56,11 +56,11 @@ class Eq1Net(nn.Module):
         return self.forward(xcat, xfeat)
 
 class Eq2Net(nn.Module):
-    def __init__(self, nembed, embed_dim, layers, out_dim):
+    def __init__(self, nembed, embed_dim, layers, out_dim, ops_func=None):
         super(Eq2Net, self).__init__()
         self.embed_dim = embed_dim
         self.embed = nn.Embedding(nembed, embed_dim)
-        self.eq_net = Net2to2(layers, out_dim)
+        self.eq_net = Net2to2(layers, out_dim, ops_func=ops_func)
         self.out_net = nn.Linear(out_dim, 1)
 
     def forward(self, xcat, xfeat):
@@ -78,11 +78,11 @@ class Eq2Net(nn.Module):
         return self.forward(xcat, xfeat)
 
 class Eq3Net(nn.Module):
-    def __init__(self, nembed, embed_dim, layers, out_dim):
+    def __init__(self, nembed, embed_dim, layers, out_dim, ops_func=None):
         super(Eq3Net, self).__init__()
         self.embed_dim = embed_dim
         self.embed = nn.Embedding(nembed, embed_dim)
-        self.eq_net = SetNet3to3(layers, out_dim)
+        self.eq_net = SetNet3to3(layers, out_dim, ops_func=ops_func)
         self.out_net = nn.Linear(out_dim, 1)
 
     def forward(self, xcat, xfeat):
@@ -101,11 +101,11 @@ class Eq3Net(nn.Module):
         return self.forward(xcat, xfeat)
 
 class Eq4Net(nn.Module):
-    def __init__(self, nembed, embed_dim, layers, out_dim):
+    def __init__(self, nembed, embed_dim, layers, out_dim, ops_func=None):
         super(Eq4Net, self).__init__()
         self.embed_dim = embed_dim
         self.embed = nn.Embedding(nembed, embed_dim)
-        self.eq_net = SetNet4to4(layers, out_dim)
+        self.eq_net = SetNet4to4(layers, out_dim, ops_func=ops_func)
         self.out_net = nn.Linear(out_dim, 1)
 
     def forward(self, xcat, xfeat):
