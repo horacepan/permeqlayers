@@ -169,7 +169,9 @@ def main(args):
     for e in range(args.epochs+ 1):
         #for xcat, xfeat, ybatch in train_dataloader:
         for batch in train_dataloader:
-            opt.zero_grad()
+            for param in model.parameters():
+                param.grad = None
+
             ybatch = batch[-1].to(device)
             ypred = model.pred_batch(batch, device)
             loss = loss_func(ybatch, ypred)

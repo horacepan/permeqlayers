@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from models import MLP
 from equivariant_layers import ops_2_to_1, ops_1_to_2, ops_1_to_1, ops_2_to_2, set_ops_3_to_3, set_ops_4_to_4
+#from equivariant_layers_expand import eops_2_to_1, eops_1_to_2, eops_1_to_1, eops_2_to_2, eset_ops_3_to_3, eset_ops_4_to_4
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 class Eq1to1(nn.Module):
@@ -18,8 +19,7 @@ class Eq1to1(nn.Module):
 
     def forward(self, inputs):
         ops = ops_1_to_1(inputs)
-        ops = torch.stack(ops, dim=2)
-        output = torch.einsum('dsb, ndbi->nsi', self.coefs, ops)
+        output = torch.einsum('dsb, nibd->nis', self.coefs, ops)
         output = output + self.bias
         return output
 
@@ -38,7 +38,6 @@ class Eq2to1(nn.Module):
         Returns: N x D x m
         '''
         ops = ops_2_to_1(inputs)
-        ops = torch.stack(ops, dim=2)
         output = torch.einsum('dsb,ndbi->nsi', self.coefs, ops)
         output = output + self.bias
         return output
@@ -55,7 +54,6 @@ class Eq1to2(nn.Module):
 
     def forward(self, inputs):
         ops = ops_1_to_2(inputs)
-        ops = torch.stack(ops, dim=2)
         output = torch.einsum('dsb,ndbij->nsij', self.coefs, ops)
         output = output + self.bias
         return output
@@ -81,7 +79,6 @@ class Eq2to2(nn.Module):
 
     def forward(self, inputs):
         ops = ops_2_to_2(inputs)
-        ops = torch.stack(ops, dim=2)
         output = torch.einsum('dsb,ndbij->nsij', self.coefs, ops)
 
         n = output.shape[-1]
@@ -121,7 +118,6 @@ class Net1to1(nn.Module):
 
     def forward(self, x):
         for layer in self.layers:
-            print('x shape:', x.shape)
             x = F.relu(layer(x))
         x = x.permute(0, 2, 1)
         output = self.out_net(x)
@@ -164,7 +160,7 @@ class SetEq3to3(nn.Module):
         self.bias = nn.Parameter(torch.zeros(1, out_dim, 1, 1, 1))
 
     def forward(self, x):
-        ops = torch.stack(set_ops_3_to_3(x), dim=2)
+        ops = set_ops_3_to_3(x)
         output = torch.einsum('dsb,ndbijk->nsijk', self.coefs, ops) # in/out/basis, batch/in/basis/ijk
         output = output + self.bias
         return output
@@ -180,7 +176,7 @@ class SetEq4to4(nn.Module):
         self.bias = nn.Parameter(torch.zeros(1, out_dim, 1, 1, 1, 1))
 
     def forward(self, x):
-        ops = torch.stack(set_ops_4_to_4(x), dim=2)
+        ops = set_ops_4_to_4(x)
         output = torch.einsum('dsb,ndbijkl->nsijkl', self.coefs, ops) # in/out/basis, batch/in/basis/ijk
         output = output + self.bias
         return output
@@ -230,7 +226,7 @@ if __name__ == '__main__':
     d_in = 5
     d_hid = 3
     d_out = 1
-    m = 2
+    m = 3
     x4 = torch.rand(N, d_in, m, m, m, m)
     x3 = torch.rand(N, d_in, m, m, m)
     x2 = torch.rand(N, d_in, m, m)
@@ -244,14 +240,15 @@ if __name__ == '__main__':
 
     out_dim = 4
     layers = [(d_in, 6), (6, 3), (3, out_dim)]
-    net = Net2to2(layers, out_dim, m)
+    net = Net2to2(layers, out_dim)
     print(m12b(m21a(x2)).shape, f'expect {N} x 1 x {m} x {m}')
     print(m21b(m12a(x1)).shape, f'expect {N} x 1 x {m}')
     print(net(x2).shape, 'expect dim:', f'{N} x {m} x {m} x {out_dim}')
 
     n11 = Net1to1(layers, out_dim)
-    x11 = torch.rand(N, d_in, m)
+    x11 = torch.rand(N, m, d_in)
     print(n11(x11), '1->1')
+    print('done 11')
     m33 = SetEq3to3(d_in, d_hid)
     print(m33(x3).shape, f'expect {N} x {d_hid} x {m} x {m} x {m}')
     m44 = SetEq4to4(d_in, d_hid)

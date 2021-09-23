@@ -15,7 +15,7 @@ def ops_1_to_1(inputs, normalize=False):
     sums = inputs.sum(dim=2, keepdim=True)
     op1 = inputs
     op2 = torch.tile(sums, (1, 1, dim))
-    return [op1, op2]
+    return torch.stack([op1, op2], dim=2)
 
 def ops_1_to_2(inputs, normalize=False):
     '''
@@ -30,7 +30,7 @@ def ops_1_to_2(inputs, normalize=False):
     op3 = torch.tile(inputs.unsqueeze(2), (1, 1, dim, 1))
     op4 = torch.tile(inputs.unsqueeze(3), (1, 1, 1, dim))
     op5 = torch.tile(sum_all.unsqueeze(3), (1, 1, dim, dim))
-    return [op1, op2, op3, op4, op5]
+    return torch.stack([op1, op2, op3, op4, op5], dim=2)
 
 def ops_2_to_1(inputs, normalize=False):
     N, D, m, m = inputs.shape
@@ -48,7 +48,7 @@ def ops_2_to_1(inputs, normalize=False):
     op4 = sum_cols
     op5 = torch.tile(sum_all.unsqueeze(2), (1, 1, dim))
     ops = [op1, op2, op3, op4, op5]
-    return [op1, op2, op3, op4, op5]
+    return torch.stack([op1, op2, op3, op4, op5], dim=2)
 
 def ops_2_to_2(inputs, normalize=False):
     N, D, m, m = inputs.shape
@@ -84,9 +84,9 @@ def ops_2_to_2(inputs, normalize=False):
             ops[i] = torch.divide(op, dim * dim)
         else:
             ops[i] = torch.divide(op, dim)
-    return ops[1:]
+    return torch.stack(ops[1:], dim=2)
 
-def set_ops_3_to_3(inputs, normalize=False):
+def set_ops_3_to_3(inputs, normalize=True):
     N, D, m, m, m = inputs.shape
     dim = inputs.shape[-1]
 
@@ -136,7 +136,7 @@ def set_ops_3_to_3(inputs, normalize=False):
         for d in range(11, 20):
             ops[d] = torch.divide(ops[d], dim * dim)
 
-    return ops[1:]
+    return torch.stack(ops[1:], dim=2)
 
 
 def set_ops_4_to_4(inputs, normalize=False):
@@ -192,7 +192,7 @@ def set_ops_4_to_4(inputs, normalize=False):
         ops.append(torch.tile(c3.view(N, D, 1, 1, m, 1), (1, 1, m, m, 1, m)))
         ops.append(torch.tile(c3.view(N, D, 1, 1, 1, m), (1, 1, m, m, m, 1)))
 
-    return ops
+    return torch.stack(ops, dim=2)
 
 if __name__ == '__main__':
     N = 32
@@ -212,11 +212,8 @@ if __name__ == '__main__':
     o22 = ops_2_to_2(x2)
     print('2->2 okay')
 
-    o33 = set_ops_3_to_3(x3)
-    t33 = torch.stack(o33, dim=2)
+    t33 = set_ops_3_to_3(x3)
     print(t33.shape)
 
-    o44 = set_ops_4_to_4(x4)
-    t44 = torch.stack(o44, dim=2)
+    t44 = set_ops_4_to_4(x4)
     print(t44.shape)
-    pdb.set_trace()
