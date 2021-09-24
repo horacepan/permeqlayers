@@ -15,6 +15,8 @@ from drug_dataloader import PrevalenceDataset, PrevalenceCategoricalDataset, gen
 from dataloader import Dataset, DataWithMask, BowDataset
 from models import DeepSets
 from main_drug import BaselineDeepSetsFeatCat, CatEmbedDeepSets
+from equivariant_layers import ops_1_to_1, ops_2_to_2, set_ops_3_to_3, set_ops_4_to_4
+from equivariant_layers_expand import eops_1_to_1, eops_2_to_2, eset_ops_3_to_3, eset_ops_4_to_4
 
 '''
 Eq3Net and Eq4Net do the work of getting data into right format
@@ -24,6 +26,21 @@ Eq3Net and Eq4Net do the work of getting data into right format
 - feed it through 3->3/4->4 layers
 - linear layer
 '''
+OPS_DISPATCH = {
+    'expand': {
+        1: eops_1_to_1,
+        2: eops_2_to_2,
+        3: eset_ops_3_to_3,
+        4: eset_ops_4_to_4
+    },
+    'default': {
+        1: ops_1_to_1,
+        2: ops_2_to_2,
+        3: set_ops_3_to_3,
+        4: set_ops_4_to_4
+    }
+}
+
 def eq_model_dispatcher(n):
     if n == 1:
         return Eq1Net
@@ -33,6 +50,13 @@ def eq_model_dispatcher(n):
         return Eq3Net
     elif n == 4:
         return Eq4Net
+
+def reset_params(model):
+    for p in model.parameters():
+        if len(p.shape) > 1:
+            torch.nn.init.xavier_uniform_(p)
+        else:
+            torch.nn.init.zeros_(p)
 
 class Eq1Net(nn.Module):
     def __init__(self, nembed, embed_dim, layers, out_dim, ops_func=None):
@@ -82,14 +106,20 @@ class Eq3Net(nn.Module):
         super(Eq3Net, self).__init__()
         self.embed_dim = embed_dim
         self.embed = nn.Embedding(nembed, embed_dim)
+        #self.ln1 = nn.LayerNorm(embed_dim)
         self.eq_net = SetNet3to3(layers, out_dim, ops_func=ops_func)
+        self.ln2 = nn.LayerNorm(out_dim)
         self.out_net = nn.Linear(out_dim, 1)
 
     def forward(self, xcat, xfeat):
-        x = F.relu(self.embed(xcat))
+        x = self.embed(xcat)
+        #x = self.ln1(x)
+        #x = F.relu(x)
         x = torch.cat([x, xfeat.unsqueeze(-1)], axis=-1)
         x = torch.einsum('bid,bjd,bkd->bdijk', x, x, x)
-        x = F.relu(self.eq_net(x))
+        x = self.eq_net(x)
+        x = self.ln2(x)
+        x = F.relu(x)
         x = self.out_net(x.sum(dim=(-2, -3, -4)))
         # now x is b x n x n x n x d
         return x
@@ -123,51 +153,45 @@ class Eq4Net(nn.Module):
         return self.forward(xcat, xfeat)
 
 def main(args):
-    print(args)
     torch.random.manual_seed(args.seed)
+    print(args)
     device = torch.device("cuda:0" if args.cuda else "cpu")
-    params = {'batch_size': args.batch_size, 'shuffle': True, 'pin_memory': True, 'num_workers': args.num_workers}
+    params = {'batch_size': args.batch_size, 'shuffle': True, 'pin_memory': args.pin, 'num_workers': args.num_workers}
     layers = [(args.embed_dim+ 1, args.hid_dim)] + [(args.hid_dim, args.hid_dim) for _ in range(args.num_eq_layers - 1)]
 
     if args.data== 'sparse':
-        print('Generating sparse data')
         train_data, test_data  = gen_sparse_drug_data(args.max_drugs, args.train_pct, seed=args.seed)
-        print(f'Train size: {len(train_data)} | Test size: {len(test_data)}')
     else:
         train_data = PrevalenceDataset(args.train_fn)
         test_data = PrevalenceDataset(args.test_fn)
-        print(f'Train size: {len(train_data)} | Test size: {len(test_data)}')
 
+    ops_func = OPS_DISPATCH[args.ops][args.eqn]
     if args.eqn == 1 and args.model == 'eq':
-        print('1-1 model')
-        model = Eq1Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim).to(device)
+        model = Eq1Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim, ops_func=ops_func).to(device)
     elif args.eqn == 2 and args.model == 'eq':
-        print('2-2 model')
-        model = Eq2Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim).to(device)
+        model = Eq2Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim, ops_func=ops_func).to(device)
     elif args.eqn == 3 and args.model == 'eq':
-        print('3-3 model')
-        model = Eq3Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim).to(device)
+        model = Eq3Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim, ops_func=ops_func).to(device)
     elif args.eqn == 4 and args.model == 'eq':
-        print('4-4 model')
-        model = Eq4Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim).to(device)
+        model = Eq4Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim, ops_func=ops_func).to(device)
     else:
-        print('Baseline model')
         model = BaselineDeepSetsFeatCat(PrevalenceDataset.num_entities + 1,
                                         args.embed_dim,
                                         args.hid_dim
                                        ).to(device)
-
+    reset_params(model)
     train_dataloader = DataLoader(train_data, **params)
     test_dataloader = DataLoader(test_data, **params)
     loss_func = nn.MSELoss()
     opt= torch.optim.Adam(model.parameters(), lr=args.lr)
     nupdates = 0
     st = time.time()
-    losses = []
-    maes = []
+    losses = [0] * 100
+    maes = [0] * 100
 
     for e in range(args.epochs+ 1):
         #for xcat, xfeat, ybatch in train_dataloader:
+        _est = time.time()
         for batch in train_dataloader:
             for param in model.parameters():
                 param.grad = None
@@ -175,18 +199,21 @@ def main(args):
             ybatch = batch[-1].to(device)
             ypred = model.pred_batch(batch, device)
             loss = loss_func(ybatch, ypred)
-            batch_mae = (ypred - ybatch).abs().mean().item()
+            #batch_mae = (ypred - ybatch).abs().mean().item()
+            batch_mae = 0
             loss.backward()
             opt.step()
-            losses.append(loss.item())
-            maes.append(batch_mae)
+            #losses.append(loss.item())
+            #maes.append(batch_mae)
             nupdates += 1
-
+        _eend = time.time()
+        etime = _eend - _est
         if e % args.print_update == 0:
             tot_se = 0
             tot_ae = 0
             with torch.no_grad():
                 #for _xcat, _xfeat, _ybatch in test_dataloader:
+                _tst = time.time()
                 for _batch in test_dataloader:
                     _ybatch = _batch[-1].to(device)
                     _ypred = model.pred_batch(_batch, device)
@@ -195,8 +222,10 @@ def main(args):
                     tot_ae += (_ypred - _ybatch).abs().sum().item()
                 tot_mse = tot_se / len(test_data)
                 tot_mae = tot_ae / len(test_data)
-                print('Epoch: {:4d} | Num updates: {:5d} | Last 100 updates: mae {:.3f}, mse: {:.3f} | Tot test mae: {:.3f} | Tot test mse: {:.3f} | Time: {:.2f}mins'.format(
-                    e, nupdates, np.mean(maes[-100:]), np.mean(losses[-100:]), tot_mae, tot_mse, (time.time() - st) / 60.
+                _tend = time.time()
+                _ttime = _tend - _tst
+                print('Ep: {:4d} | Ups: {:5d} | Last 100 ups: mae {:.2f}, mse: {:.2f} | Tot test mae: {:.2f} | Tot test mse: {:.2f} | Time: {:.2f}mins | Ep time: {:.2f}s, T time: {:.2f}s'.format(
+                    e, nupdates, np.mean(maes[-100:]), np.mean(losses[-100:]), tot_mae, tot_mse, (time.time() - st) / 60., etime, _ttime
                 ))
 
     if args.save_fn:
@@ -216,6 +245,7 @@ if __name__ == '__main__':
     parser.add_argument('--print_update', type=int, default=1000)
     parser.add_argument('--cuda', action='store_true', default=False)
     parser.add_argument('--num_workers', type=int, default=1)
+    parser.add_argument('--pin', action='store_true', default=False)
     parser.add_argument('--train_fn', type=str, default='./data/prevalence/prevalence_train.csv')
     parser.add_argument('--test_fn', type=str, default='./data/prevalence/prevalence_test.csv')
     parser.add_argument('--train_pct', type=float, default=0.8)
@@ -224,5 +254,6 @@ if __name__ == '__main__':
     parser.add_argument('--max_drugs', type=int, default=4)
     parser.add_argument('--eqn', type=int, default=2)
     parser.add_argument('--model', type=str, default='baseline')
+    parser.add_argument('--ops', type=str, default='default')
     args = parser.parse_args()
     main(args)
