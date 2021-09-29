@@ -45,12 +45,6 @@ class Eq1Net(nn.Module):
         x = self.out_net(x.sum(dim=(-2)))
         return x
 
-    def pred_batch(self, batch, device):
-        xcat, xfeat, _ = batch
-        xcat = xcat.to(device)
-        xfeat = xfeat.to(device)
-        return self.forward(xcat, xfeat)
-
 class Eq2Net(nn.Module):
     def __init__(self, nembed, embed_dim, layers, out_dim, ops_func=eops_2_to_2, dropout_prob=0.5):
         super(Eq2Net, self).__init__()
@@ -72,12 +66,6 @@ class Eq2Net(nn.Module):
         x = F.dropout(x, self.dropout_prob, training=self.training)
         x = self.out_net(x)
         return x
-
-    def pred_batch(self, batch, device):
-        xcat, xfeat, _ = batch
-        xcat = xcat.to(device)
-        xfeat = xfeat.to(device)
-        return self.forward(xcat, xfeat)
 
 class Eq3Net(nn.Module):
     def __init__(self, nembed, embed_dim, layers, out_dim, ops_func=eset_ops_3_to_3, dropout_prob=0.5):
@@ -101,12 +89,6 @@ class Eq3Net(nn.Module):
         x = self.out_net(x)
         return x
 
-    def pred_batch(self, batch, device):
-        xcat, xfeat, _ = batch
-        xcat = xcat.to(device)
-        xfeat = xfeat.to(device)
-        return self.forward(xcat, xfeat)
-
 class Eq4Net(nn.Module):
     def __init__(self, nembed, embed_dim, layers, out_dim, ops_func=eset_ops_4_to_4):
         super(Eq4Net, self).__init__()
@@ -123,22 +105,15 @@ class Eq4Net(nn.Module):
         x = self.out_net(x.sum(dim=(-2, -3, -4, -5)))
         return x
 
-    def pred_batch(self, batch, device):
-        xcat, xfeat, _ = batch
-        xcat = xcat.to(device)
-        xfeat = xfeat.to(device)
-        return self.forward(xcat, xfeat)
-
 class Eq2DeepSet(nn.Module):
-    def __init__(self, nembed, embed_dim, hid_dim, out_dim):
+    def __init__(self, nembed, embed_dim, hid_dim, out_dim, dropout_prob=0):
         super(Eq2DeepSet, self).__init__()
         self.embed_dim = embed_dim
         self.embed = nn.Embedding(nembed, embed_dim) # B x n x d
         self.fc1 = nn.Linear(embed_dim + 1, hid_dim)
-        self.fc2 = nn.Linear(hid_dim, hid_dim)
-        self.fc3 = nn.Linear(hid_dim, out_dim)
+        self.fc2 = nn.Linear(hid_dim, out_dim)
         self.out_net = nn.Linear(out_dim, 1)
-        self.dropout_prob = 0.5
+        self.dropout_prob = dropout_prob
 
     def forward(self, xcat, xfeat):
         x = F.relu(self.embed(xcat))
@@ -150,16 +125,6 @@ class Eq2DeepSet(nn.Module):
         x = self.fc2(x)
         x = F.relu(x)
         x = F.dropout(x, self.dropout_prob, training=self.training)
-        x = self.fc3(x)
-        x = F.relu(x)
-        x = F.dropout(x, self.dropout_prob, training=self.training)
         x = x.sum(dim=(-2, -3))
-        x = F.dropout(x, self.dropout_prob, training=self.training)
         x = self.out_net(x)
         return x
-
-    def pred_batch(self, batch, device):
-        xcat, xfeat, _ = batch
-        xcat = xcat.to(device)
-        xfeat = xfeat.to(device)
-        return self.forward(xcat, xfeat)
