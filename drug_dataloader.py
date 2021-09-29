@@ -6,6 +6,10 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader, random_split, ConcatDataset
 
+def _new_key(lst):
+    skey = tuple(sorted(lst))
+    return skey
+
 def _load_df(fn, agg=None):
     df = pd.read_csv(fn)
     df.drop('Unnamed: 0', axis=1, inplace=True)
@@ -70,6 +74,19 @@ def gen_sparse_drug_data(max_drugs, train_pct, agg='median', seed=0, df_fmt='./d
     test_dataset = max_drug_test
     return train_dataset, test_dataset
 
+def gen_sparse_embedded_drug_data(max_train_pct, agg='median', seed=0,
+                                  df_fmt='./data/prevalence/prevalence_{}.csv'):
+    max_drug_dataset = PrevalenceDataset(df_fmt.format(max_drugs), max_drugs=max_drugs)
+    train_len = int(train_pct * len(max_drug_dataset))
+    test_len = len(max_drug_dataset) - train_len
+    max_drug_train, max_drug_test = random_split(max_drug_dataset, (train_len, test_len),
+                                                 generator=torch.Generator().manual_seed(seed))
+
+    ds = [PrevalenceDataset(df_fmt.format(i), max_drugs=max_drugs) for i in range(1, max_drugs)] + [max_drug_train]
+    train_dataset = ConcatDataset(ds)
+    test_dataset = max_drug_test
+    return train_dataset, test_dataset
+
 class PrevalenceDataset(torch.utils.data.Dataset):
     '''
     Prevalence dataset spits out: one hot categorical variables of the drug
@@ -112,6 +129,36 @@ class PrevalenceDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         return self.drugs[idx], self.doses[idx], self.ys[idx]
+
+    def save_pkl(self, save_fn):
+        data = {'drugs': self.drugs, 'doses': self.doses, 'ys': self.ys}
+        with open(save_fn, 'wb') as f:
+            pickle.dump(data, f)
+
+    @classmethod
+    def from_pkl(cls, pkl_fn):
+        self = cls.__new__(cls)
+        with open(pkl_fn, 'rb') as f:
+            data = pickle.load(f)
+            self.drugs = data['drugs']
+            self.doses = data['doses']
+            self.ys = data['ys']
+            return self
+
+class PrevalenceTupleDataset(PrevalenceDataset):
+    def __init__(self, fn, df=None, agg='median', max_drugs=5):
+        super(PrevalenceTupleDataset, self).__init__(fn, df, agg, max_drugs)
+        self.tup_drugs = self._gen_tups(data)
+
+    def _gen_tups(self, data):
+        self.tup_drugs = []
+        for tlst in data:
+            xs = prod(tlst, tlst, tlst)
+    def __len__(self):
+        return len(self.drugs)
+
+    def __getitem__(self, idx):
+        return self.tup_drugs[idx], self.doses[idx], self.ys[idx]
 
     def save_pkl(self, save_fn):
         data = {'drugs': self.drugs, 'doses': self.doses, 'ys': self.ys}

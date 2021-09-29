@@ -8,48 +8,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from eq_models import Eq1to2, Eq2to2, Net1to1, Net2to2, SetNet3to3, SetNet4to4
 from main import BaselineEmbedDeepSets
-
+from utils import get_logger, setup_experiment
 from drug_dataloader import PrevalenceDataset, PrevalenceCategoricalDataset, gen_sparse_drug_data
 from dataloader import Dataset, DataWithMask, BowDataset
-from models import DeepSets
 from main_drug import BaselineDeepSetsFeatCat, CatEmbedDeepSets
-from equivariant_layers import ops_1_to_1, ops_2_to_2, set_ops_3_to_3, set_ops_4_to_4
-from equivariant_layers_expand import eops_1_to_1, eops_2_to_2, eset_ops_3_to_3, eset_ops_4_to_4
-
-'''
-Eq3Net and Eq4Net do the work of getting data into right format
-- input data -> embed
-- embedding -> cat the doseage
-- construct kth order tensor from this by taking the outer product
-- feed it through 3->3/4->4 layers
-- linear layer
-'''
-OPS_DISPATCH = {
-    'expand': {
-        1: eops_1_to_1,
-        2: eops_2_to_2,
-        3: eset_ops_3_to_3,
-        4: eset_ops_4_to_4
-    },
-    'default': {
-        1: ops_1_to_1,
-        2: ops_2_to_2,
-        3: set_ops_3_to_3,
-        4: set_ops_4_to_4
-    }
-}
-
-def eq_model_dispatcher(n):
-    if n == 1:
-        return Eq1Net
-    elif n == 2:
-        return Eq2Net
-    elif n == 3:
-        return Eq3Net
-    elif n == 4:
-        return Eq4Net
+from prevalence_models import Eq1Net, Eq2Net, Eq3Net, Eq4Net, Eq2DeepSet
 
 def reset_params(model):
     for p in model.parameters():
@@ -58,106 +22,12 @@ def reset_params(model):
         else:
             torch.nn.init.zeros_(p)
 
-class Eq1Net(nn.Module):
-    def __init__(self, nembed, embed_dim, layers, out_dim, ops_func=None):
-        super(Eq1Net, self).__init__()
-        self.embed_dim = embed_dim
-        self.embed = nn.Embedding(nembed, embed_dim)
-        self.eq_net = Net1to1(layers, out_dim, ops_func=ops_func)
-        self.out_net = nn.Linear(out_dim, 1)
-
-    def forward(self, xcat, xfeat):
-        x = self.embed(xcat)
-        x = torch.cat([x, xfeat.unsqueeze(-1)], axis=-1)
-        x = F.relu(self.eq_net(x)) # x should have dim bxnxd
-        x = self.out_net(x.sum(dim=(-2)))
-        return x
-
-    def pred_batch(self, batch, device):
-        xcat, xfeat, _ = batch
-        xcat = xcat.to(device)
-        xfeat = xfeat.to(device)
-        return self.forward(xcat, xfeat)
-
-class Eq2Net(nn.Module):
-    def __init__(self, nembed, embed_dim, layers, out_dim, ops_func=None):
-        super(Eq2Net, self).__init__()
-        self.embed_dim = embed_dim
-        self.embed = nn.Embedding(nembed, embed_dim)
-        self.eq_net = Net2to2(layers, out_dim, ops_func=ops_func)
-        self.out_net = nn.Linear(out_dim, 1)
-
-    def forward(self, xcat, xfeat):
-        x = self.embed(xcat)
-        x = torch.cat([x, xfeat.unsqueeze(-1)], axis=-1)
-        x = torch.einsum('bid,bjd->bdij', x, x)
-        x = F.relu(self.eq_net(x))
-        x = self.out_net(x.sum(dim=(-3, -2)))
-        return x
-
-    def pred_batch(self, batch, device):
-        xcat, xfeat, _ = batch
-        xcat = xcat.to(device)
-        xfeat = xfeat.to(device)
-        return self.forward(xcat, xfeat)
-
-class Eq3Net(nn.Module):
-    def __init__(self, nembed, embed_dim, layers, out_dim, ops_func=None):
-        super(Eq3Net, self).__init__()
-        self.embed_dim = embed_dim
-        self.embed = nn.Embedding(nembed, embed_dim)
-        #self.ln1 = nn.LayerNorm(embed_dim)
-        self.eq_net = SetNet3to3(layers, out_dim, ops_func=ops_func)
-        self.ln2 = nn.LayerNorm(out_dim)
-        self.out_net = nn.Linear(out_dim, 1)
-
-    def forward(self, xcat, xfeat):
-        x = self.embed(xcat)
-        #x = self.ln1(x)
-        #x = F.relu(x)
-        x = torch.cat([x, xfeat.unsqueeze(-1)], axis=-1)
-        x = torch.einsum('bid,bjd,bkd->bdijk', x, x, x)
-        x = self.eq_net(x)
-        x = self.ln2(x)
-        x = F.relu(x)
-        x = self.out_net(x.sum(dim=(-2, -3, -4)))
-        # now x is b x n x n x n x d
-        return x
-
-    def pred_batch(self, batch, device):
-        xcat, xfeat, _ = batch
-        xcat = xcat.to(device)
-        xfeat = xfeat.to(device)
-        return self.forward(xcat, xfeat)
-
-class Eq4Net(nn.Module):
-    def __init__(self, nembed, embed_dim, layers, out_dim, ops_func=None):
-        super(Eq4Net, self).__init__()
-        self.embed_dim = embed_dim
-        self.embed = nn.Embedding(nembed, embed_dim)
-        self.eq_net = SetNet4to4(layers, out_dim, ops_func=ops_func)
-        self.out_net = nn.Linear(out_dim, 1)
-
-    def forward(self, xcat, xfeat):
-        x = F.relu(self.embed(xcat))
-        x = torch.cat([x, xfeat.unsqueeze(-1)], axis=-1)
-        x = torch.einsum('bid,bjd,bkd,bld->bdijkl', x, x, x, x)
-        x = F.relu(self.eq_net(x))
-        x = self.out_net(x.sum(dim=(-2, -3, -4, -5)))
-        return x
-
-    def pred_batch(self, batch, device):
-        xcat, xfeat, _ = batch
-        xcat = xcat.to(device)
-        xfeat = xfeat.to(device)
-        return self.forward(xcat, xfeat)
 
 def main(args):
+    log = get_logger(args.logfile, args.stdout)
+    log.info(args)
     torch.random.manual_seed(args.seed)
-    print(args)
-    device = torch.device("cuda:0" if args.cuda else "cpu")
-    params = {'batch_size': args.batch_size, 'shuffle': True, 'pin_memory': args.pin, 'num_workers': args.num_workers}
-    layers = [(args.embed_dim+ 1, args.hid_dim)] + [(args.hid_dim, args.hid_dim) for _ in range(args.num_eq_layers - 1)]
+    device = torch.device("cuda:0" if args.cuda and torch.cuda.is_available() else "cpu")
 
     if args.data== 'sparse':
         train_data, test_data  = gen_sparse_drug_data(args.max_drugs, args.train_pct, seed=args.seed)
@@ -165,32 +35,37 @@ def main(args):
         train_data = PrevalenceDataset(args.train_fn)
         test_data = PrevalenceDataset(args.test_fn)
 
-    ops_func = OPS_DISPATCH[args.ops][args.eqn]
+    layers = [(args.embed_dim+ 1, args.hid_dim)] + [(args.hid_dim, args.hid_dim) for _ in range(args.num_eq_layers - 1)]
     if args.eqn == 1 and args.model == 'eq':
-        model = Eq1Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim, ops_func=ops_func).to(device)
+        model = Eq1Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim).to(device)
     elif args.eqn == 2 and args.model == 'eq':
-        model = Eq2Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim, ops_func=ops_func).to(device)
+        model = Eq2Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim, dropout_prob=args.dropout_prob).to(device)
     elif args.eqn == 3 and args.model == 'eq':
-        model = Eq3Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim, ops_func=ops_func).to(device)
+        model = Eq3Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim, dropout_prob=args.dropout_prob).to(device)
     elif args.eqn == 4 and args.model == 'eq':
-        model = Eq4Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim, ops_func=ops_func).to(device)
+        model = Eq4Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim).to(device)
+    elif args.eqn == 2 and args.model == 'mlp':
+        log.info('Making Eq2DeepSet')
+        model = Eq2DeepSet(PrevalenceDataset.num_entities + 1, args.embed_dim, args.hid_dim, args.out_dim).to(device)
     else:
+        log.info('Doing baseline with dropout')
         model = BaselineDeepSetsFeatCat(PrevalenceDataset.num_entities + 1,
                                         args.embed_dim,
-                                        args.hid_dim
+                                        args.hid_dim,
+                                        args.dropout_prob
                                        ).to(device)
     reset_params(model)
+    params = {'batch_size': args.batch_size, 'shuffle': True, 'pin_memory': args.pin, 'num_workers': args.num_workers}
     train_dataloader = DataLoader(train_data, **params)
     test_dataloader = DataLoader(test_data, **params)
     loss_func = nn.MSELoss()
     opt= torch.optim.Adam(model.parameters(), lr=args.lr)
-    nupdates = 0
     st = time.time()
-    losses = [0] * 100
-    maes = [0] * 100
+    losses = []
+    maes = []
+    nupdates = 0
 
     for e in range(args.epochs+ 1):
-        #for xcat, xfeat, ybatch in train_dataloader:
         _est = time.time()
         for batch in train_dataloader:
             for param in model.parameters():
@@ -199,21 +74,21 @@ def main(args):
             ybatch = batch[-1].to(device)
             ypred = model.pred_batch(batch, device)
             loss = loss_func(ybatch, ypred)
-            #batch_mae = (ypred - ybatch).abs().mean().item()
-            batch_mae = 0
+            batch_mae = (ypred - ybatch).abs().mean().item()
             loss.backward()
             opt.step()
-            #losses.append(loss.item())
-            #maes.append(batch_mae)
+            losses.append(loss.item())
+            maes.append(batch_mae)
             nupdates += 1
         _eend = time.time()
         etime = _eend - _est
+
         if e % args.print_update == 0:
             tot_se = 0
             tot_ae = 0
             with torch.no_grad():
-                #for _xcat, _xfeat, _ybatch in test_dataloader:
                 _tst = time.time()
+                model.eval()
                 for _batch in test_dataloader:
                     _ybatch = _batch[-1].to(device)
                     _ypred = model.pred_batch(_batch, device)
@@ -224,15 +99,18 @@ def main(args):
                 tot_mae = tot_ae / len(test_data)
                 _tend = time.time()
                 _ttime = _tend - _tst
-                print('Ep: {:4d} | Ups: {:5d} | Last 100 ups: mae {:.2f}, mse: {:.2f} | Tot test mae: {:.2f} | Tot test mse: {:.2f} | Time: {:.2f}mins | Ep time: {:.2f}s, T time: {:.2f}s'.format(
-                    e, nupdates, np.mean(maes[-100:]), np.mean(losses[-100:]), tot_mae, tot_mse, (time.time() - st) / 60., etime, _ttime
+                log.info('Ep: {:4d} | Ups: {:5d} | Last 100 ups: mae {:.2f}, mse: {:.2f} | Tot test mae: {:.2f} | Tot test mse: {:.2f} | Time: {:.2f}mins | Ep time: {:.2f}s, T time: {:.2f}s'.format(
+                    e, nupdates, np.mean(maes[-min(100, len(maes)):]), np.mean(losses[-min(100, len(losses)):]), tot_mae, tot_mse, (time.time() - st) / 60., etime, _ttime
                 ))
+            model.train()
 
     if args.save_fn:
         torch.save(model.state_dict(), args.save_fn)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument('--logfile', type=str, default='')
+    parser.add_argument('--stdout', action='store_true', default=False)
     parser.add_argument('--train_pkl', type=str, default='./data/prevalence_dataset.pkl')
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--lr', type=float, default=0.001)
@@ -254,6 +132,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_drugs', type=int, default=4)
     parser.add_argument('--eqn', type=int, default=2)
     parser.add_argument('--model', type=str, default='baseline')
-    parser.add_argument('--ops', type=str, default='default')
+    parser.add_argument('--ops', type=str, default='expand')
+    parser.add_argument('--dropout_prob', type=float, default=0)
     args = parser.parse_args()
     main(args)

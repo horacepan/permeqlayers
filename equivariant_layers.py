@@ -50,7 +50,7 @@ def ops_2_to_1(inputs, normalize=False):
     ops = [op1, op2, op3, op4, op5]
     return torch.stack([op1, op2, op3, op4, op5], dim=2)
 
-def ops_2_to_2(inputs, normalize=False):
+def ops_2_to_2(inputs, normalize=True):
     N, D, m, m = inputs.shape
     dim = inputs.shape[-1]
 

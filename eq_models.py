@@ -7,7 +7,6 @@ from models import MLP
 from equivariant_layers import ops_2_to_1, ops_1_to_2, ops_1_to_1, ops_2_to_2, set_ops_3_to_3, set_ops_4_to_4
 from equivariant_layers_expand import eops_1_to_1, eops_1_to_2, eops_2_to_1, eops_2_to_2, eset_ops_3_to_3, eset_ops_4_to_4
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 class Eq1to1(nn.Module):
     def __init__(self, in_dim, out_dim, ops_func=None):
         super(Eq1to1, self).__init__()
@@ -84,6 +83,7 @@ class Eq2to2(nn.Module):
 
         n = output.shape[-1]
         if self.diag_eye is None:
+            device = self.diag_bias.device
             self.diag_eye = torch.eye(n).unsqueeze(0).unsqueeze(0).to(device)
         diag_bias = self.diag_eye.multiply(self.diag_bias)
         output = output + self.bias + diag_bias

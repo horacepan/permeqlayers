@@ -19,7 +19,11 @@ class MLP(nn.Module):
 
     def init_params(self):
         for p in self.parameters():
-            p.data.normal_(0, 0.01)
+            if len(p.shape) > 1:
+                torch.nn.init.xavier_uniform_(p)
+            else:
+                torch.nn.init.zeros_(p)
+
 
 class DeepSets(nn.Module):
     def __init__(self, nin, nhid, nout, mode='mean'):
