@@ -40,9 +40,9 @@ def model_dispatch(args, device):
     if args.model == 'baseline':
         model = BaselineEmbedDeepSets(NHEROS, args.embed_dim, args.hid_dim)
     elif args.model == 'eq2':
-        model = Dota2Eq2Embed(NHEROS, args.embed_dim, args.hid_dim, args.hid_dim)
+        model = Dota2Eq2Embed(NHEROS, args.embed_dim, args.hid_dim, args.hid_dim, dropout_prob=args.dropout_prob)
     elif args.model == 'eq3':
-        model = Dota2Eq3Embed(NHEROS, args.embed_dim, args.hid_dim, args.hid_dim)
+        model = Dota2Eq3Embed(NHEROS, args.embed_dim, args.hid_dim, args.hid_dim, dropout_prob=args.dropout_prob)
 
     for p in model.parameters():
         if len(p.shape) > 1:
@@ -93,13 +93,15 @@ def main(args):
 
         if e % args.print_update == 0:
             correct = 0
-            for xtb, ytb in test_dataloader:
-                xtb, ytb = xtb.to(device), ytb.to(device)
-                ytp = model(xtb)
-                _, predicted = torch.max(ytp.data, 1)
-                correct += (predicted == ytb).sum().item()
+            model.eval()
+            with torch.no_grad():
+                for xtb, ytb in test_dataloader:
+                    xtb, ytb = xtb.to(device), ytb.to(device)
+                    ytp = model(xtb)
+                    _, predicted = torch.max(ytp.data, 1)
+                    correct += (predicted == ytb).sum().item()
             acc = correct / len(test_data)
-
+            model.train()
             print('Epoch: {:4d} | Last ep Loss: {:.3f}, acc: {:.3f} | Test Acc: {:.3f} | Time: {:.2f}mins'.format(
                 e, np.mean(ep_loss), np.mean(ep_acc), acc, (time.time() - st) / 60.
             ))
@@ -118,5 +120,6 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=10000)
     parser.add_argument('--print_update', type=int, default=1000)
     parser.add_argument('--cuda', action='store_true', default=False)
+    parser.add_argument('--dropout_prob', type=float, default=0)
     args = parser.parse_args()
     main(args)

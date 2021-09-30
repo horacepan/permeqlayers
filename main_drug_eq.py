@@ -9,7 +9,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from main import BaselineEmbedDeepSets
 from utils import get_logger, setup_experiment_log
 from drug_dataloader import PrevalenceDataset, PrevalenceCategoricalDataset, gen_sparse_drug_data
 from dataloader import Dataset, DataWithMask, BowDataset

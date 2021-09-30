@@ -9,7 +9,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from eq_models import Eq1to2, Eq2to2
-from main import BaselineEmbedDeepSets
 
 from drug_dataloader import PrevalenceDataset, PrevalenceCategoricalDataset
 from dataloader import Dataset, DataWithMask, BowDataset
