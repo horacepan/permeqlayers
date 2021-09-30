@@ -1,5 +1,6 @@
 import pdb
 import pickle
+import os
 import time
 import argparse
 from tqdm import tqdm
@@ -30,8 +31,10 @@ def pred_batch(model, batch, device):
 
 def main(args):
     logfile, swr = setup_experiment_log(args, args.savedir, args.exp_name, args.save)
+    savedir = os.path.join(args.savedir, args.exp_name)
     log = get_logger(logfile)
     log.info(args)
+    log.info(f'Saving in: {savedir}')
     torch.random.manual_seed(args.seed)
     device = torch.device("cuda:0" if args.cuda and torch.cuda.is_available() else "cpu")
 
@@ -58,7 +61,8 @@ def main(args):
         model = BaselineDeepSetsFeatCat(PrevalenceDataset.num_entities + 1,
                                         args.embed_dim,
                                         args.hid_dim,
-                                        args.dropout_prob
+                                        args.out_dim,
+                                        dropout_prob=args.dropout_prob
                                        ).to(device)
     reset_params(model)
     params = {'batch_size': args.batch_size, 'shuffle': True, 'pin_memory': args.pin, 'num_workers': args.num_workers}
@@ -121,8 +125,7 @@ def main(args):
         if e % args.save_iter == 0 and e > 0:
             torch.save(model.state_dict(), os.path.join(savedir, f'model_{e}.pt'))
 
-    if args.save_fn:
-        torch.save(model.state_dict(), args.save_fn)
+    torch.save(model.state_dict(), os.path.join(savedir, f'model_{e}_final.pt'))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

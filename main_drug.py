@@ -16,11 +16,11 @@ from dataloader import Dataset, DataWithMask, BowDataset
 from models import DeepSets
 
 class BaselineDeepSetsFeatCat(nn.Module):
-    def __init__(self, nembed, embed_dim, hid_dim, nlayers=1, dropout=False, dropout_prob=0.5):
+    def __init__(self, nembed, embed_dim, hid_dim, out_dim, dropout_prob=0):
         super(BaselineDeepSetsFeatCat, self).__init__()
         self.embed = nn.Embedding(nembed, embed_dim)
-        self.set_embed = DeepSets(embed_dim + 1, hid_dim, hid_dim) # catted a feature
-        self.fc_out = nn.Linear(hid_dim, 1)
+        self.set_embed = DeepSets(embed_dim + 1, hid_dim, out_dim) # catted a feature
+        self.fc_out = nn.Linear(out_dim, 1)
         self.dropout_prob = dropout_prob
 
     def forward(self, xcat, xfeat):
@@ -28,7 +28,7 @@ class BaselineDeepSetsFeatCat(nn.Module):
         embed_catted = torch.cat([embed, xfeat.unsqueeze(-1)], axis=-1)
         set_embed = F.relu(self.set_embed(embed_catted))
         x = F.dropout(set_embed, self.dropout_prob, training=self.training)
-        return self.fc_out(set_embed)
+        return self.fc_out(x)
 
     def pred_batch(self, batch, device):
         xcat, xfeat, _ = batch
