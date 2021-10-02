@@ -17,6 +17,12 @@ from eq_models import *
 from models import MLP
 from utils import setup_experiment_log, get_logger
 
+def nparams(model):
+    tot = 0
+    for p in model.parameters():
+        tot += p.numel()
+    return tot
+
 def load_train_test(dataset, root='./data/'):
     transform=transforms.Compose([
             transforms.ToTensor(),
@@ -81,10 +87,15 @@ class MiniDeepSets(nn.Module):
             tot += p.numel()
         return tot
 
-class Eq2Net(nn.Module):
-    def __init__(self, in_dim, hid_dim, out_dim, ops_func=eops_2_to_2, dropout_prob=0.5):
-        super(Eq2Net, self).__init__()
-        self.embed = MLP(in_dim, hid_dim, hid_dim)
+class UniqueEq2Net(nn.Module):
+    def __init__(self, in_dim, hid_dim, out_dim, ops_func=eops_2_to_2, dropout_prob=0):
+        super(UniqueEq2Net, self).__init__()
+        self.embed = nn.Sequential(
+            nn.Linear(in_dim, hid_dim),
+            nn.ReLU(),
+            nn.Linear(hid_dim, hid_dim),
+            nn.ReLU()
+        )
         self.eq_net = Net2to2([(hid_dim, hid_dim)], out_dim, ops_func=ops_func)
         self.out_net = nn.Linear(out_dim, 1)
         self.dropout_prob = dropout_prob
@@ -101,11 +112,30 @@ class Eq2Net(nn.Module):
         x = self.out_net(x)
         return x
 
-    def nparams(self):
-        tot = 0
-        for p in self.parameters():
-            tot += p.numel()
-        return tot
+class UniqueEq3Net(nn.Module):
+    def __init__(self, in_dim, hid_dim, out_dim, ops_func=eset_ops_3_to_3, dropout_prob=0):
+        super(UniqueEq3Net, self).__init__()
+        self.embed = nn.Sequential(
+            nn.Linear(in_dim, hid_dim),
+            nn.ReLU(),
+            nn.Linear(hid_dim, hid_dim),
+            nn.ReLU()
+        )
+        self.eq_net = SetNet3to3([(hid_dim, hid_dim)], out_dim, ops_func=ops_func)
+        self.out_net = nn.Linear(out_dim, 1)
+        self.dropout_prob = dropout_prob
+
+    def forward(self, x):
+        x = self.embed(x)
+        x = torch.einsum('bid,bjd,bkd->bdijk', x, x, x)
+        x = self.eq_net(x)
+        x = F.relu(x)
+        x = F.dropout(x, self.dropout_prob, training=self.training)
+        x = x.sum(dim=(-4, -3, -2))
+        x = F.relu(x)
+        x = F.dropout(x, self.dropout_prob, training=self.training)
+        x = self.out_net(x)
+        return x
 
 def main(args):
     logfile, swr = setup_experiment_log(args, args.savedir, args.exp_name, args.save)
@@ -120,21 +150,23 @@ def main(args):
     device = torch.device("cuda:0" if args.cuda and torch.cuda.is_available() else "cpu")
 
     in_dim = 784
-    lr = 0.001
     criterion = torch.nn.MSELoss()
     if args.model == 'baseline':
-        model = MiniDeepSets(in_dim, args.hid_dim, args.out_dim).to(device)
+        model = MiniDeepSets(in_dim, args.hid_dim, out_dim=1).to(device)
     elif args.model == 'eq2':
-        model = Eq2Net(in_dim, args.hid_dim, args.out_dim).to(device)
-        for p in model.parameters():
-            if len(p.shape) == 1:
-                torch.nn.init.zeros_(p)
-            else:
-                torch.nn.init.xavier_uniform_(p)
+        model = UniqueEq2Net(in_dim, args.hid_dim, args.out_dim, dropout_prob=args.dropout_prob).to(device)
+    elif args.model == 'eq3':
+        model = UniqueEq3Net(in_dim, args.hid_dim, args.out_dim, dropout_prob=args.dropout_prob).to(device)
 
-    opt = torch.optim.Adam(model.parameters(), lr=lr)
+    for p in model.parameters():
+        if len(p.shape) == 1:
+            torch.nn.init.zeros_(p)
+        else:
+            torch.nn.init.xavier_uniform_(p)
+
+    opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     log.info('Starting training on: {}'.format(model.__class__))
-    log.info('Model parameters: {}'.format(model.nparams))
+    log.info('Model parameters: {}'.format(nparams(model)))
     model.train()
 
     for e in (range(args.epochs)):
@@ -150,13 +182,29 @@ def main(args):
             loss.backward()
             opt.step()
 
-        nuniques = len(set(torch.round(ypred).int().view(-1).tolist()))
-        log.info('Epoch {:4d} | Loss: {:.3f} | uniques: {}'.format(
-              e, np.mean(batch_losses), nuniques))
+        if e % args.print_update == 0:
+            model.eval()
+            tot_se = tot_ae = 0
+            with torch.no_grad():
+                for x, y in test_dataloader:
+                    y = y.float().to(device)
+                    ypred = model(x.float().to(device))
+                    ypred = ypred.squeeze(-1)
+                    loss = criterion(y.float().to(device), ypred)
+                    tot_se += loss.item() * len(y)
+                    tot_ae += (ypred - y).abs().sum().item()
+            mse = tot_se / len(test_data)
+            mae = tot_ae / len(test_data)
+            nuniques = len(set(torch.round(ypred).int().view(-1).tolist()))
+            tuniques = len(set(y.int().view(-1).tolist()))
+            log.info('Epoch {:4d} | Test MAE: {:.2f}, MSE: {:.2f} | uniques: {}, true uniques: {}'.format(
+                e, np.mean(batch_losses), mae, mse, nuniques, tuniques))
+
+            model.train()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--savedir', type=str, default='./results/uniques/')
+    parser.add_argument('--savedir', type=str, default='./results/unique/')
     parser.add_argument('--exp_name', type=str, default='')
     parser.add_argument('--dataset', type=str, default='mnist')
     parser.add_argument('--save', default=False, action='store_true')
