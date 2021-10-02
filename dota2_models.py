@@ -36,7 +36,7 @@ class Dota2Eq2Embed(nn.Module):
         self.eq2_team2 = Net2to2(layers, out_dim, ops_func=eops_2_to_2)
         self.eq2_pair = Net2to2(layers, out_dim, ops_func=eops_2_to_2)
         #self.fc_out = nn.Linear(2 * out_dim, num_classes)
-        self.fc_out = nn.Linear(3 * out_dim, num_classes)
+        self.fc_out = nn.Linear(2 * out_dim, num_classes)
         self.dropout_prob = dropout_prob
 
     def forward(self, x):
@@ -48,24 +48,24 @@ class Dota2Eq2Embed(nn.Module):
 
         ep1 = torch.einsum('bid,bjd->bdij', e1, e1)
         ep2 = torch.einsum('bid,bjd->bdij', e2, e2)
-        ep3 = torch.einsum('bid,bjd->bdij', e1, e2)
+        #ep3 = torch.einsum('bid,bjd->bdij', e1, e2)
 
         t1 = self.eq2_team1(ep1)
         t2 = self.eq2_team2(ep2)
-        t3 = self.eq2_pair(ep3)
+        #t3 = self.eq2_pair(ep3)
 
         t1 = F.relu(t1)
         t1 = F.dropout(t1, self.dropout_prob, training=self.training)
         t2 = F.relu(t2)
         t2 = F.dropout(t2, self.dropout_prob, training=self.training)
-        t3 = F.relu(t3)
-        t3 = F.dropout(t3, self.dropout_prob, training=self.training)
+        #t3 = F.relu(t3)
+        #t3 = F.dropout(t3, self.dropout_prob, training=self.training)
 
         t1_embed = t1.mean(dim=(-2, -3))
         t2_embed = t2.mean(dim=(-2, -3))
-        t3_embed = t3.mean(dim=(-2, -3))
-        #t12_embed = torch.hstack([t1_embed, t2_embed])
-        t12_embed = torch.hstack([t1_embed, t2_embed, t3_embed])
+        #t3_embed = t3.mean(dim=(-2, -3))
+        t12_embed = torch.hstack([t1_embed, t2_embed])
+        #t12_embed = torch.hstack([t1_embed, t2_embed, t3_embed])
         t12_embed = F.dropout(t12_embed)
         return self.fc_out(t12_embed)
 

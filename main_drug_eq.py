@@ -22,6 +22,19 @@ def reset_params(model):
         else:
             torch.nn.init.zeros_(p)
 
+def try_load_weights(savedir, model, device):
+    files = os.listdir(savedir)
+    models = [f for f in files if 'model_' in f and 'final' not in f]
+    if len(models) == 0:
+        return False, 0
+
+    max_ep = max([int(f[6:f.index('.')]) for f in models])
+    fname = os.path.join(savedir, f'model_{max_ep}.pt')
+    sd = torch.load(fname, map_location=device)
+
+    model.load_state_dict(sd)
+    return True, max_ep
+
 def pred_batch(model, batch, device):
     xcat, xfeat, _ = batch
     xcat = xcat.to(device)
@@ -63,7 +76,15 @@ def main(args):
                                         args.out_dim,
                                         dropout_prob=args.dropout_prob
                                        ).to(device)
-    reset_params(model)
+
+    loaded, start_epoch = try_load_weights(savedir, model, device)
+    if not loaded:
+        log.info('Init model parameters')
+        reset_params(model)
+        start_epoch = 0
+    else:
+        log.info('Loaded weights from {savedir}')
+
     params = {'batch_size': args.batch_size, 'shuffle': True, 'pin_memory': args.pin, 'num_workers': args.num_workers}
     val_len = int(0.1 * len(train_data))
     #train_data, val_data = random_split(train_data, (len(train_data) - val_len, val_len))
@@ -74,7 +95,7 @@ def main(args):
     opt= torch.optim.Adam(model.parameters(), lr=args.lr)
     st = time.time()
 
-    for e in range(args.epochs+ 1):
+    for e in range(start_epoch, start_epoch + args.epochs+ 1):
         ep_start = time.time()
         batch_maes = []
         batch_mses = []

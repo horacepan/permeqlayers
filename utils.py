@@ -37,7 +37,6 @@ def setup_experiment_log(args, savedir='./results/prevalence/', exp_name='test',
     Returns: tuple of str (log file) and SummaryWriter
     '''
     if not save:
-        print('returning here')
         return None, None
 
     if os.path.exists(savedir):
@@ -51,7 +50,7 @@ def setup_experiment_log(args, savedir='./results/prevalence/', exp_name='test',
         logfile = os.path.join(exp_dir, 'output.log')
         cnt = 1
         while os.path.exists(logfile):
-            logfile = os.path.join(sumdir, f'output{cnt}.log')
+            logfile = os.path.join(exp_dir, f'output{cnt}.log')
             cnt += 1
 
     else:
