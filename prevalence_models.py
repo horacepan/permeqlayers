@@ -46,13 +46,14 @@ class Eq1Net(nn.Module):
         return x
 
 class Eq2Net(nn.Module):
-    def __init__(self, nembed, embed_dim, layers, out_dim, ops_func=eops_2_to_2, dropout_prob=0.5):
+    def __init__(self, nembed, embed_dim, layers, out_dim, ops_func=eops_2_to_2, dropout_prob=0.5, pool='sum'):
         super(Eq2Net, self).__init__()
         self.embed_dim = embed_dim
         self.embed = nn.Embedding(nembed, embed_dim)
         self.eq_net = Net2to2(layers, out_dim, ops_func=ops_func)
         self.out_net = nn.Linear(out_dim, 1)
         self.dropout_prob = dropout_prob
+        self.pool = torch.sum if pool == 'sum' else torch.amax
 
     def forward(self, xcat, xfeat):
         x = self.embed(xcat)
@@ -61,20 +62,21 @@ class Eq2Net(nn.Module):
         x = self.eq_net(x)
         x = F.relu(x)
         x = F.dropout(x, self.dropout_prob, training=self.training)
-        x = x.sum(dim=(-3, -2))
+        x = self.pool(x, dim=(-3, -2))
         x = F.relu(x)
         x = F.dropout(x, self.dropout_prob, training=self.training)
         x = self.out_net(x)
         return x
 
 class Eq3Net(nn.Module):
-    def __init__(self, nembed, embed_dim, layers, out_dim, ops_func=eset_ops_3_to_3, dropout_prob=0.5):
+    def __init__(self, nembed, embed_dim, layers, out_dim, ops_func=eset_ops_3_to_3, dropout_prob=0.5, pool='sum'):
         super(Eq3Net, self).__init__()
         self.embed_dim = embed_dim
         self.embed = nn.Embedding(nembed, embed_dim)
         self.eq_net = SetNet3to3(layers, out_dim, ops_func=ops_func)
         self.out_net = nn.Linear(out_dim, 1)
         self.dropout_prob = dropout_prob
+        self.pool = torch.sum if pool == 'sum' else torch.amax
 
     def forward(self, xcat, xfeat):
         x = self.embed(xcat)
@@ -83,7 +85,7 @@ class Eq3Net(nn.Module):
         x = self.eq_net(x)
         x = F.relu(x)
         x = F.dropout(x, self.dropout_prob, training=self.training)
-        x = x.sum(dim=(-2, -3, -4))
+        x = self.pool(x, dim=(-2, -3, -4))
         x = F.relu(x)
         x = F.dropout(x, self.dropout_prob, training=self.training)
         x = self.out_net(x)

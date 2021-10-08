@@ -26,14 +26,20 @@ class MLP(nn.Module):
 
 
 class DeepSets(nn.Module):
-    def __init__(self, nin, nhid, nout, mode='mean'):
+    def __init__(self, nin, nhid, nout, pool='sum'):
         super(DeepSets, self).__init__()
         self.in_embed = MLP(nin, nhid, nhid)
         self.out_embed = nn.Linear(nhid, nout)
-        self.mode = mode
+        if pool == 'sum':
+            self.pool = torch.sum
+        elif pool == 'max':
+            self.pool = torch.amax
+        elif pool == 'mean':
+            self.pool = torch.mean
 
     def forward(self, x):
-        x = self.in_embed(x).sum(axis=1)
+        x = self.in_embed(x)
+        x = self.pool(x, dim=-1)
         return self.out_embed(x)
 
 class PairSetEmbed(nn.Module):

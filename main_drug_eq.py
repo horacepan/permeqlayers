@@ -24,7 +24,7 @@ def reset_params(model):
 
 def try_load_weights(savedir, model, device):
     files = os.listdir(savedir)
-    models = [f for f in files if 'model_' in f and 'final' not in f]
+    models = [f[f.index('model'):] for f in files if 'model_' in f and 'final' not in f]
     if len(models) == 0:
         return False, 0
 
@@ -60,21 +60,30 @@ def main(args):
     if args.eqn == 1 and args.model == 'eq':
         model = Eq1Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim).to(device)
     elif args.eqn == 2 and args.model == 'eq':
-        model = Eq2Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim, dropout_prob=args.dropout_prob).to(device)
+        log.info('Eq2net: {} embed, {} layers, {} final linear, {:.1f} dropout, pool mode {}'.format(
+            args.embed_dim, layers, args.out_dim, args.dropout_prob, args.pool
+        ))
+        model = Eq2Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim, dropout_prob=args.dropout_prob, pool=args.pool).to(device)
     elif args.eqn == 3 and args.model == 'eq':
-        model = Eq3Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim, dropout_prob=args.dropout_prob).to(device)
+        log.info('Eq3net: {} embed, {} layers, {} final linear, {:.1f} dropout, pool mode {}'.format(
+            args.embed_dim, layers, args.out_dim, args.dropout_prob, args.pool
+        ))
+        model = Eq3Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim, dropout_prob=args.dropout_prob, pool=args.pool).to(device)
     elif args.eqn == 4 and args.model == 'eq':
         model = Eq4Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim).to(device)
     elif args.eqn == 2 and args.model == 'mlp':
         log.info('Making Eq2DeepSet')
         model = Eq2DeepSet(PrevalenceDataset.num_entities + 1, args.embed_dim, args.hid_dim, args.out_dim).to(device)
     else:
-        log.info('Doing baseline with dropout')
+        log.info('Doing baseline with dropout {}, pool {}'.format(
+            args.dropout_prob, args.pool
+        ))
         model = BaselineDeepSetsFeatCat(PrevalenceDataset.num_entities + 1,
                                         args.embed_dim,
                                         args.hid_dim,
                                         args.out_dim,
-                                        dropout_prob=args.dropout_prob
+                                        dropout_prob=args.dropout_prob,
+                                        pool=args.pool
                                        ).to(device)
 
     loaded, start_epoch = try_load_weights(savedir, model, device)
@@ -118,7 +127,6 @@ def main(args):
             swr.add_scalar('train/batch_avg_mae', np.mean(batch_maes), e)
             swr.add_scalar('train/batch_avg_mse', np.mean(batch_mses), e)
 
-
         if e % args.print_update == 0:
             tot_se = tot_ae = 0
             with torch.no_grad():
@@ -142,6 +150,11 @@ def main(args):
                 swr.add_scalar('val/mae', tot_mse, e)
             model.train()
 
+            torch.save(model.state_dict(), os.path.join(savedir, f'last_model_{e}.pt'))
+            last_fname = os.path.join(savedir, f'last_model_{e - args.print_update}.pt')
+            if os.path.exists(last_fname):
+                os.remove(last_fname)
+
         if e % args.save_iter == 0 and e > 0:
             torch.save(model.state_dict(), os.path.join(savedir, f'model_{e}.pt'))
 
@@ -152,7 +165,6 @@ if __name__ == '__main__':
     parser.add_argument('--savedir', type=str, default='./results/prevalence/')
     parser.add_argument('--exp_name', type=str, default='')
     parser.add_argument('--save', default=False, action='store_true')
-    parser.add_argument('--train_pkl', type=str, default='./data/prevalence_dataset.pkl')
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--batch_size', type=int, default=1024)
@@ -174,7 +186,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_drugs', type=int, default=4)
     parser.add_argument('--eqn', type=int, default=2)
     parser.add_argument('--model', type=str, default='baseline')
-    parser.add_argument('--ops', type=str, default='expand')
+    parser.add_argument('--pool', type=str, default='sum')
     parser.add_argument('--dropout_prob', type=float, default=0)
     args = parser.parse_args()
     main(args)

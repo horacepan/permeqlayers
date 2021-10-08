@@ -21,7 +21,7 @@ def get_logger(fname=None, stdout=True):
     str_fmt = '[%(asctime)s.%(msecs)03d] %(message)s'
     date_fmt = "%Y-%m-%d %H:%M:%S"
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=logging.INFO,
         format=str_fmt,
         datefmt=date_fmt,
         handlers=handlers

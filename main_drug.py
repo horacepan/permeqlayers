@@ -15,10 +15,10 @@ from dataloader import Dataset, DataWithMask, BowDataset
 from models import DeepSets
 
 class BaselineDeepSetsFeatCat(nn.Module):
-    def __init__(self, nembed, embed_dim, hid_dim, out_dim, dropout_prob=0):
+    def __init__(self, nembed, embed_dim, hid_dim, out_dim, dropout_prob=0, pool='sum'):
         super(BaselineDeepSetsFeatCat, self).__init__()
         self.embed = nn.Embedding(nembed, embed_dim)
-        self.set_embed = DeepSets(embed_dim + 1, hid_dim, out_dim) # catted a feature
+        self.set_embed = DeepSets(embed_dim + 1, hid_dim, out_dim, pool=pool) # catted a feature
         self.fc_out = nn.Linear(out_dim, 1)
         self.dropout_prob = dropout_prob
 
