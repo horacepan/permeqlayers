@@ -58,8 +58,11 @@ class UniqueEq2Net(nn.Module):
         self.dropout_prob = dropout_prob
 
     def forward(self, x):
+        B, k, h, w = x.shape
+        x = x.view(B * k, 1, h, w)
         x = self.embed(x)
         x = F.relu(x)
+        x = x.view(B, k, x.shape[-1])
         x = torch.einsum('bid,bjd->bdij', x, x)
         x = self.eq_net(x)
         x = F.relu(x)
@@ -100,17 +103,21 @@ def main(args):
     log.info(args)
 
     device = torch.device("cuda:0" if args.cuda and torch.cuda.is_available() else "cpu")
-    train_dataset = OmniSetData.from_files(args.idx_pkl, args.tgt_pkl, args.img_fn)
-    test_dataset = OmniSetData.from_files(args.test_idx_pkl, args.test_tgt_pkl, imgs=train_dataset.imgs)
+    normalize = transforms.Normalize(mean=[0.92206, 0.92206, 0.92206],
+                                         std=[0.08426, 0.08426, 0.08426])
+    transform = transforms.Compose([transforms.ToTensor(), normalize])
+    omni = Omniglot(root='./data/', transform=transform, background=True, download=True)
+    train_dataset = OmniSetData.from_files(args.idx_pkl, args.tgt_pkl, omni)
+    test_dataset = OmniSetData.from_files(args.test_idx_pkl, args.test_tgt_pkl, omni)
     train_dataloader = DataLoader(dataset=train_dataset,
         sampler=BatchSampler(
-            SequentialSampler(train_dataset), batch_size=32, drop_last=False
+            SequentialSampler(train_dataset), batch_size=args.batch_size, drop_last=False
         ),
         num_workers=args.num_workers, pin_memory=args.pin
     )
     test_dataloader = DataLoader(dataset=test_dataset,
         sampler=BatchSampler(
-            SequentialSampler(test_dataset), batch_size=32, drop_last=False
+            SequentialSampler(test_dataset), batch_size=args.batch_size, drop_last=False
         ),
         num_workers=args.num_workers, pin_memory=args.pin
     )
@@ -119,17 +126,13 @@ def main(args):
     in_dim = 105
     if args.model == 'baseline':
         kwargs = {'nchannels': args.nchannels}
-        model = MiniDeepSets(in_dim, args.hid_dim, out_dim=1, **kwargs)
-        log.info('Post load model on cpu: Consumed {:.2f}mb mem'.format(check_memory(False)))
-        for p in model.parameters():
-            print(p.shape)
-        model = model.to(device)
+        model = MiniDeepSets(in_dim, args.hid_dim, out_dim=1, **kwargs).to(device)
     elif args.model == 'eq2':
         model = UniqueEq2Net(in_dim, args.hid_dim, args.out_dim, dropout_prob=args.dropout_prob).to(device)
     elif args.model == 'eq3':
         model = UniqueEq3Net(in_dim, args.hid_dim, args.out_dim, dropout_prob=args.dropout_prob).to(device)
-    log.info('Post model to device: Consumed {:.2f}mb mem'.format(check_memory(False)))
 
+    log.info('Post model to device: Consumed {:.2f}mb mem'.format(check_memory(False)))
     for p in model.parameters():
         if len(p.shape) == 1:
             torch.nn.init.zeros_(p)
@@ -145,13 +148,13 @@ def main(args):
         batch_losses = []
         ncorrect = 0
         tot = 0
-        for batch in train_dataloader:
+        for batch in tqdm(train_dataloader):
             opt.zero_grad()
             x, y = batch[0][0], batch[1][0] # batch sampler returns 1 x B x ...
             x = x.float().to(device)
             factorial_y = torch.FloatTensor(factorial(y)).to(device)
             y = y.to(device)
-            ypred = model(x)
+            ypred = F.softplus(model(x))
 
             loss = torch.sum(neg_ll(ypred.squeeze(-1), y, factorial_y))
             estimated = torch.round(ypred).int()
@@ -170,18 +173,21 @@ def main(args):
             ncorrect = tot = 0
 
             with torch.no_grad():
-                for x, y in test_dataloader:
+                for batch in test_dataloader:
+                    x, y = batch[0][0], batch[1][0]
                     x = x.float().to(device)
-                    factorial_y = factorial(y).to(device)
+                    factorial_y = torch.FloatTensor(factorial(y)).to(device)
                     y = y.float().to(device)
+                    ypred = F.softplus(model(x))
 
-                    ypred = model(x)
                     loss = torch.sum(neg_ll(ypred, y, factorial_y))
-                    ncorrect += (torch.round(ypred).int() == y.int()).sum().item()
+                    estimated = torch.round(ypred).int()
+                    ncorrect += (estimated == y.int()).sum().item()
                     val_loss += loss.item()
                     tot += len(x)
 
             acc = ncorrect / tot
+            val_loss = val_loss / tot
             log.info('Epoch {:4d} | Last ep acc: {:.2f}, loss: {:.2f} | Test acc: {:.2f}, loss: {:.2f}'.format(
                      e, epoch_acc, epoch_loss, acc, val_loss))
 
@@ -200,13 +206,13 @@ if __name__ == '__main__':
     parser.add_argument('--save', default=False, action='store_true')
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--lr', type=float, default=0.001)
-    parser.add_argument('--batch_size', type=int, default=1024)
+    parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--nchannels', type=int, default=12)
     parser.add_argument('--hid_dim', type=int, default=32)
     parser.add_argument('--out_dim', type=int, default=128)
     parser.add_argument('--num_eq_layers', type=int, default=1)
     parser.add_argument('--epochs', type=int, default=10000)
-    parser.add_argument('--print_update', type=int, default=1000)
+    parser.add_argument('--print_update', type=int, default=1)
     parser.add_argument('--save_iter', type=int, default=5000)
     parser.add_argument('--cuda', action='store_true', default=False)
     parser.add_argument('--num_workers', type=int, default=0)

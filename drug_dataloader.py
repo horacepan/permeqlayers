@@ -146,14 +146,22 @@ class PrevalenceDataset(torch.utils.data.Dataset):
             return self
 
 class PrevalenceTupleDataset(PrevalenceDataset):
-    def __init__(self, fn, df=None, agg='median', max_drugs=5):
+    def __init__(self, fn, df=None, agg='median', max_drugs=5, order=3):
         super(PrevalenceTupleDataset, self).__init__(fn, df, agg, max_drugs)
-        self.tup_drugs = self._gen_tups(data)
+        self.tup_drugs = self._gen_tups(data, order)
 
-    def _gen_tups(self, data):
+    def _gen_tups(self, data, order):
         self.tup_drugs = []
+        xs = [x] * order
+        uniques = sorted(set(prod(*xs)))
+        rev_map = {tup: idx for idx, tup in enumerate(uniques)}
+
         for tlst in data:
             xs = prod(tlst, tlst, tlst)
+            # then convert to sorted tuple of unique vals here
+            # then map xs -> index of this tuple
+            self.tup_drugs.append(new_key)
+
     def __len__(self):
         return len(self.drugs)
 

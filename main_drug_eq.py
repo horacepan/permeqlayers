@@ -22,7 +22,10 @@ def reset_params(model):
         else:
             torch.nn.init.zeros_(p)
 
-def try_load_weights(savedir, model, device):
+def try_load_weights(savedir, model, device, saved=True):
+    if not saved:
+        return False, 0
+
     files = os.listdir(savedir)
     models = [f[f.index('model'):] for f in files if 'model_' in f and 'final' not in f]
     if len(models) == 0:
@@ -86,7 +89,7 @@ def main(args):
                                         pool=args.pool
                                        ).to(device)
 
-    loaded, start_epoch = try_load_weights(savedir, model, device)
+    loaded, start_epoch = try_load_weights(savedir, model, device, args.save)
     if not loaded:
         log.info('Init model parameters')
         reset_params(model)

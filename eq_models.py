@@ -70,6 +70,7 @@ class Eq2to2(nn.Module):
         self.coefs = nn.Parameter(torch.normal(0, np.sqrt(2. / (in_dim + out_dim + self.basis_dim)), (in_dim, out_dim, self.basis_dim)))
         self.bias = nn.Parameter(torch.zeros(1, out_dim, 1, 1))
         self.diag_bias = nn.Parameter(torch.zeros(1, out_dim, 1, 1))
+        self.diag_eyes = {}
 
         self.diag_eye = None #torch.eye(n).unsqueeze(0).unsqueeze(0).to(device)
         if ops_func is None:
@@ -82,10 +83,14 @@ class Eq2to2(nn.Module):
         output = torch.einsum('dsb,ndbij->nsij', self.coefs, ops)
 
         n = output.shape[-1]
-        if self.diag_eye is None:
+        if n not in self.diag_eyes:
             device = self.diag_bias.device
-            self.diag_eye = torch.eye(n).unsqueeze(0).unsqueeze(0).to(device)
-        diag_bias = self.diag_eye.multiply(self.diag_bias)
+            diag_eye = torch.eye(n).unsqueeze(0).unsqueeze(0).to(device)
+            diag_eye = torch.eye(n).unsqueeze(0).unsqueeze(0).to(device)
+            self.diag_eyes[n] = diag_eye
+
+        diag_eye = self.diag_eyes[n]
+        diag_bias = diag_eye.multiply(self.diag_bias)
         output = output + self.bias + diag_bias
         return output
 

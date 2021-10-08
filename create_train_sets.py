@@ -5,6 +5,7 @@ import os
 import torch
 import numpy as np
 import pickle
+from torchvision.datasets import Omniglot
 
 def make_dataset(labels, batch_size, total_batches, unique_chars):
     train_labels = []
@@ -40,17 +41,11 @@ def make_dataset(labels, batch_size, total_batches, unique_chars):
         train_labels.append(np.array(label_set))
     return train_inds, train_labels
 
-def main(seed, dir_pref):
-    st = time.time()
-    #labels = np.load('./data/omniglot-py/train_labels.npy')
-    labels = np.load('./train_labels.npy')
-    end = time.time()
-    print('Load time: {:.2f}s'.format(end - st))
-
+def main(data, labels, dir_pref, seed):
     batch_size = 32
     train_batches = 2000
     test_batches = train_batches // 5
-    unique_chars = 964
+    unique_chars = len(set(labels))
     st = time.time()
     train_inds, train_targets = make_dataset(labels, batch_size, train_batches, unique_chars)
     print('Done with train batches: {:.2f}s'.format(time.time() - st))
@@ -74,8 +69,9 @@ def main(seed, dir_pref):
     print('Done')
 
 if __name__ == '__main__':
-    #dir_pref = './data/omniglot-py/unique_chars_dataset'
-    dir_pref = './unique_chars_dataset'
+    data = Omniglot(root='./data/', background=True, download=True)
+    labels = np.array([t[1] for t in data._flat_character_images])
+    dir_pref = './data/omniglot-py/unique_chars_dataset'
     for s in range(1, 6):
         np.random.RandomState(s)
-        main(s, dir_pref)
+        main(data, labels, dir_pref, s)
