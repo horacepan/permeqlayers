@@ -67,3 +67,23 @@ def check_memory(verbose=True):
     if verbose:
         print("Consumed {:.2f}mb memory".format(mem))
     return mem
+
+'''
+def load_train_test(dataset, root='./data/'):
+    transform=transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307,), (0.3081,))
+    ])
+    if dataset == 'mnist':
+        normalize = transforms.Normalize((0.1307,), (0.3081,))
+        transform = transforms.Compose([transforms.ToTensor(), normalize])
+        train = MNIST(root, train=True, download=True, transform=transform)
+        test = MNIST(root, train=False, download=True, transform=transform)
+    elif dataset == 'omniglot':
+        normalize = transforms.Normalize(mean=[0.92206, 0.92206, 0.92206],
+                                         std=[0.08426, 0.08426, 0.08426])
+        transform = transforms.Compose([transforms.ToTensor(), normalize])
+        train = Omniglot(root, background=True, download=True, transform=transform)
+        test = Omniglot(root, background=False, download=True, transform=transform)
+    return train, test
+'''

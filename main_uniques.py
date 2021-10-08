@@ -185,6 +185,7 @@ def main(args):
         if e % args.print_update == 0:
             model.eval()
             tot_se = tot_ae = 0
+            ncorrect = 0
             with torch.no_grad():
                 for x, y in test_dataloader:
                     y = y.float().to(device)
@@ -193,12 +194,14 @@ def main(args):
                     loss = criterion(y.float().to(device), ypred)
                     tot_se += loss.item() * len(y)
                     tot_ae += (ypred - y).abs().sum().item()
+                    ncorrect += (torch.round(ypred).int() == y.int()).sum().item()
             mse = tot_se / len(test_data)
             mae = tot_ae / len(test_data)
             nuniques = len(set(torch.round(ypred).int().view(-1).tolist()))
             tuniques = len(set(y.int().view(-1).tolist()))
-            log.info('Epoch {:4d} | Test MAE: {:.2f}, MSE: {:.2f} | uniques: {}, true uniques: {}'.format(
-                e, np.mean(batch_losses), mae, mse, nuniques, tuniques))
+            accuracy = ncorrect / len(test_data)
+            log.info('Epoch {:4d} | Test MAE: {:.2f}, MSE: {:.2f} | acc: {:3f} | uniques: {}, true uniques: {}'.format(
+                e, mae, mse, accuracy, nuniques, tuniques))
 
             model.train()
 
