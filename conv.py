@@ -15,22 +15,22 @@ def _compute_hid_dim(in_dim, conv_layers):
     return conv_layers[-1].out_channels * dim * dim
 
 class BasicConvNet(nn.Module):
-    def __init__(self, in_dim, nout, nchannels=8):
+    def __init__(self, in_dim, nout, nchannels=8, conv_layers=4, dropout=0):
         super(BasicConvNet, self).__init__()
         self.in_dim = in_dim
-        self.conv1 = nn.Conv2d(1, nchannels, kernel_size=3)
-        self.conv2 = nn.Conv2d(nchannels, nchannels, kernel_size=3)
-        self.conv3 = nn.Conv2d(nchannels, nchannels, kernel_size=3)
-        self.conv4 = nn.Conv2d(nchannels, nchannels, kernel_size=3)
-        self.conv_layers = [self.conv1, self.conv2, self.conv3, self.conv4]
+        self.conv_layers = nn.ModuleList(
+            [nn.Conv2d(1, nchannels, kernel_size=3)] + [nn.Conv2d(nchannels, nchannels, kernel_size=3) for _ in range(conv_layers - 1)]
+        )
         self.hid_dim = _compute_hid_dim(in_dim, self.conv_layers)
         self.fc = nn.Linear(self.hid_dim, nout)
+        self.dropout = dropout
 
     def forward(self, x):
         for conv in self.conv_layers:
             x = conv(x)
             x = F.relu(x)
             x = F.max_pool2d(x, (2, 2), 2)
+            x = F.dropout(x, self.dropout, training=self.training)
 
         x = x.view(len(x), -1)
         x = self.fc(x)

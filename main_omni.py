@@ -50,10 +50,10 @@ class MiniDeepSets(nn.Module):
         return x
 
 class UniqueEq2Net(nn.Module):
-    def __init__(self, in_dim, hid_dim, out_dim, ops_func=eops_2_to_2, dropout_prob=0):
+    def __init__(self, in_dim, hid_dim, out_dim, ops_func=eops_2_to_2, dropout_prob=0, nlayers=1, **kwargs):
         super(UniqueEq2Net, self).__init__()
-        self.embed = BasicConvNet(in_dim, hid_dim)
-        self.eq_net = Net2to2([(hid_dim, hid_dim)], out_dim, ops_func=ops_func)
+        self.embed = BasicConvNet(in_dim, hid_dim, **kwargs)
+        self.eq_net = Net2to2([(hid_dim, hid_dim)] * nlayers, out_dim, ops_func=ops_func)
         self.out_net = nn.Linear(out_dim, 1)
         self.dropout_prob = dropout_prob
 
@@ -76,14 +76,17 @@ class UniqueEq2Net(nn.Module):
 class UniqueEq3Net(nn.Module):
     def __init__(self, in_dim, hid_dim, out_dim, ops_func=eset_ops_3_to_3, dropout_prob=0):
         super(UniqueEq3Net, self).__init__()
-        self.embed = BasicConvNet(in_dim, hid_dim, out_dim)
+        self.embed = BasicConvNet(in_dim, hid_dim)
         self.eq_net = SetNet3to3([(hid_dim, hid_dim)], out_dim, ops_func=ops_func)
         self.out_net = nn.Linear(out_dim, 1)
         self.dropout_prob = dropout_prob
 
     def forward(self, x):
+        B, k, h, w = x.shape
+        x = x.view(B * k, 1, h, w)
         x = self.embed(x)
         x = F.relu(x)
+        x = x.view(B, k, x.shape[-1])
         x = torch.einsum('bid,bjd,bkd->bdijk', x, x, x)
         x = self.eq_net(x)
         x = F.relu(x)
@@ -94,10 +97,17 @@ class UniqueEq3Net(nn.Module):
         x = self.out_net(x)
         return x
 
+def set_seeds(s):
+    torch.backends.cudnn.deterministic = True
+    torch.manual_seed(s)
+    torch.cuda.manual_seed(s)
+    np.random.seed(s)
+
 def main(args):
     logfile, swr = setup_experiment_log(args, args.savedir, args.exp_name, args.save)
     savedir = os.path.join(args.savedir, args.exp_name)
     log = get_logger(logfile)
+    set_seeds(args.seed)
     log.info('Starting experiment!')
     log.info('Args')
     log.info(args)
@@ -125,12 +135,15 @@ def main(args):
     log.info('Post load data: Consumed {:.2f}mb mem'.format(check_memory(False)))
     in_dim = 105
     if args.model == 'baseline':
-        kwargs = {'nchannels': args.nchannels}
+        kwargs = {'nchannels': args.nchannels, 'conv_layers': args.conv_layers, 'dropout': args.conv_dropout}
         model = MiniDeepSets(in_dim, args.hid_dim, out_dim=1, **kwargs).to(device)
     elif args.model == 'eq2':
-        model = UniqueEq2Net(in_dim, args.hid_dim, args.out_dim, dropout_prob=args.dropout_prob).to(device)
+        kwargs = {'nchannels': args.nchannels, 'dropout': args.dropout_prob, 'conv_layers': args.conv_layers, 'dropout': args.conv_dropout}
+        model = UniqueEq2Net(in_dim, args.hid_dim, args.out_dim, dropout_prob=args.dropout_prob, nlayers=args.num_eq_layers, **kwargs)
+        model = model.to(device)
     elif args.model == 'eq3':
-        model = UniqueEq3Net(in_dim, args.hid_dim, args.out_dim, dropout_prob=args.dropout_prob).to(device)
+        model = UniqueEq3Net(in_dim, args.hid_dim, args.out_dim, dropout_prob=args.dropout_prob)
+        model = model.to(device)
 
     log.info('Post model to device: Consumed {:.2f}mb mem'.format(check_memory(False)))
     for p in model.parameters():
@@ -143,53 +156,59 @@ def main(args):
     log.info('Starting training on: {}'.format(model.__class__))
     log.info('Model parameters: {}'.format(nparams(model)))
     model.train()
+    out_func = F.softplus if args.out_func == 'softplus' else torch.exp
+    log.info('Output function: {}'.format(out_func))
 
     for e in (range(args.epochs)):
         batch_losses = []
         ncorrect = 0
         tot = 0
-        for batch in tqdm(train_dataloader):
+        bcnt = 0
+        for batch in (train_dataloader):
             opt.zero_grad()
             x, y = batch[0][0], batch[1][0] # batch sampler returns 1 x B x ...
             x = x.float().to(device)
             factorial_y = torch.FloatTensor(factorial(y)).to(device)
             y = y.to(device)
-            ypred = F.softplus(model(x))
+            ypred = out_func(model(x)).squeeze(-1)
 
-            loss = torch.sum(neg_ll(ypred.squeeze(-1), y, factorial_y))
+            loss = torch.sum(neg_ll(ypred, y, factorial_y))
             estimated = torch.round(ypred).int()
             ncorrect += torch.sum(estimated==y).item()
-            tot += len(batch)
+            tot += len(x)
             batch_losses.append(loss.item())
             loss.backward()
             opt.step()
+            bcnt += 1
+
+            #if bcnt % 100 == 0:
+            #    print('     Batch {} | Running acc: {:.2f}, Loss: {:.2f}'.format(bcnt, ncorrect / tot, np.mean(batch_losses)))
 
         epoch_acc = ncorrect / tot
         epoch_loss = np.mean(batch_losses)
 
         if e % args.print_update == 0:
             model.eval()
-            val_loss = 0
+            val_losses = []
             ncorrect = tot = 0
 
             with torch.no_grad():
-                for batch in test_dataloader:
+                for batch in (test_dataloader):
                     x, y = batch[0][0], batch[1][0]
                     x = x.float().to(device)
                     factorial_y = torch.FloatTensor(factorial(y)).to(device)
                     y = y.float().to(device)
-                    ypred = F.softplus(model(x))
+                    ypred = out_func(model(x)).squeeze(-1)
 
                     loss = torch.sum(neg_ll(ypred, y, factorial_y))
                     estimated = torch.round(ypred).int()
                     ncorrect += (estimated == y.int()).sum().item()
-                    val_loss += loss.item()
+                    val_losses.append(loss.item())
                     tot += len(x)
 
             acc = ncorrect / tot
-            val_loss = val_loss / tot
             log.info('Epoch {:4d} | Last ep acc: {:.2f}, loss: {:.2f} | Test acc: {:.2f}, loss: {:.2f}'.format(
-                     e, epoch_acc, epoch_loss, acc, val_loss))
+                     e, epoch_acc, epoch_loss, acc, np.mean(val_losses)))
 
             model.train()
 
@@ -208,6 +227,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--nchannels', type=int, default=12)
+    parser.add_argument('--conv_layers', type=int, default=4)
     parser.add_argument('--hid_dim', type=int, default=32)
     parser.add_argument('--out_dim', type=int, default=128)
     parser.add_argument('--num_eq_layers', type=int, default=1)
@@ -217,12 +237,11 @@ if __name__ == '__main__':
     parser.add_argument('--cuda', action='store_true', default=False)
     parser.add_argument('--num_workers', type=int, default=0)
     parser.add_argument('--pin', action='store_true', default=False)
-    parser.add_argument('--train_pct', type=float, default=0.8)
-    parser.add_argument('--data', type=str, default='sparse')
     parser.add_argument('--save_fn', type=str, default='')
-    parser.add_argument('--eqn', type=int, default=2)
     parser.add_argument('--model', type=str, default='baseline')
     parser.add_argument('--ops', type=str, default='expand')
     parser.add_argument('--dropout_prob', type=float, default=0)
+    parser.add_argument('--conv_dropout', type=float, default=0)
+    parser.add_argument('--out_func', type=str, default='softplus')
     args = parser.parse_args()
     main(args)
