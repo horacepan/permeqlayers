@@ -117,7 +117,7 @@ def main(args):
                                          std=[0.08426, 0.08426, 0.08426])
     transform = transforms.Compose([transforms.ToTensor(), normalize])
     omni = Omniglot(root='./data/', transform=transform, background=True, download=True)
-    train_dataset = OmniSetData.from_files(args.idx_pkl, args.tgt_pkl, omni)
+    train_dataset = OmniSetData.from_files(args.idx_pkl, args.tgt_pkl, omni, args.train_fraction)
     test_dataset = OmniSetData.from_files(args.test_idx_pkl, args.test_tgt_pkl, omni)
     train_dataloader = DataLoader(dataset=train_dataset,
         sampler=BatchSampler(
@@ -153,6 +153,10 @@ def main(args):
             torch.nn.init.xavier_uniform_(p)
 
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
+    if args.lr_decay:
+        log.info('Doing lr decay: factor {}, patience: {}'.format(args.lr_factor, args.lr_patience))
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, 'min', factor=args.lr_factor, patience=args.lr_patience)
+
     log.info('Starting training on: {}'.format(model.__class__))
     log.info('Model parameters: {}'.format(nparams(model)))
     model.train()
@@ -206,9 +210,15 @@ def main(args):
                     val_losses.append(loss.item())
                     tot += len(x)
 
+                if e == 19:
+                    print('Done with 10 epochs!')
+                    pdb.set_trace()
+
             acc = ncorrect / tot
             log.info('Epoch {:4d} | Last ep acc: {:.2f}, loss: {:.2f} | Test acc: {:.2f}, loss: {:.2f}'.format(
                      e, epoch_acc, epoch_loss, acc, np.mean(val_losses)))
+            if args.lr_decay:
+                scheduler.step(np.mean(val_losses))
 
             model.train()
 
@@ -243,5 +253,9 @@ if __name__ == '__main__':
     parser.add_argument('--dropout_prob', type=float, default=0)
     parser.add_argument('--conv_dropout', type=float, default=0)
     parser.add_argument('--out_func', type=str, default='softplus')
+    parser.add_argument('--lr_decay', action='store_true', default=False)
+    parser.add_argument('--lr_factor', type=float, default=0.5)
+    parser.add_argument('--lr_patience', type=int, default=3)
+    parser.add_argument('--train_fraction', type=float, default=1)
     args = parser.parse_args()
     main(args)

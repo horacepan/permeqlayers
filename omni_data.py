@@ -23,7 +23,7 @@ class OmniSetData(Dataset):
         self._img_w = omni[0][0].shape[2]
 
     @staticmethod
-    def from_files(idx_pkl, tgt_pkl, omni):
+    def from_files(idx_pkl, tgt_pkl, omni, fraction=1):
         xmaps = {}
         ymaps = {}
         xs = pickle.load(open(idx_pkl, 'rb'))
@@ -34,8 +34,9 @@ class OmniSetData(Dataset):
             if n not in xmaps:
                 xmaps[n] = []
                 ymaps[n] = []
-            xmaps[n].append(x)
-            ymaps[n].append(y)
+            frac_len = int(len(x) * fraction)
+            xmaps[n].append(x[:frac_len])
+            ymaps[n].append(y[:frac_len])
 
         flattened_xs = {n: np.vstack(xmaps[n]) for n in xmaps.keys()}
         flattened_ys = {n: np.concatenate(ymaps[n]) for n in ymaps.keys()}
