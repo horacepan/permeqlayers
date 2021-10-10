@@ -49,11 +49,42 @@ class MiniDeepSets(nn.Module):
         x = self.fc_out(x)
         return x
 
+class UniqueEq12Net(nn.Module):
+    def __init__(self, in_dim, hid_dim, out_dim, dropout_prob=0, nlayers=1, **kwargs):
+        super(UniqueEq12Net, self).__init__()
+        self.embed = BasicConvNet(in_dim, hid_dim, **kwargs)
+        #self.eq1_net = Net1to2([(hid_dim, hid_dim)] * nlayers, out_dim, ops_func=eops_1_to_2)
+        self.eq1_net = Eq1to2(hid_dim, hid_dim)
+        self.eq2_net = Eq2to2(hid_dim, out_dim)
+        #self.eq1_net = Net1to2([(hid_dim, hid_dim)] * nlayers, out_dim, ops_func=eops_1_to_2)
+        #self.eq2_net = Net2to2([(hid_dim, hid_dim)] * nlayers, out_dim, ops_func=eops_2_to_2)
+        self.out_net = nn.Linear(out_dim, 1)
+        self.dropout_prob = dropout_prob
+
+    def forward(self, x):
+        B, k, h, w = x.shape
+        x = x.view(B * k, 1, h, w)
+        x = self.embed(x)
+        x = F.relu(x)
+        x = x.view(B, k, x.shape[-1]).permute(0, 2, 1)
+        x = self.eq1_net(x)
+        x = F.relu(x)
+        x = self.eq2_net(x)
+        x = F.relu(x)
+        x = F.dropout(x, self.dropout_prob, training=self.training)
+        x = x.sum(dim=(-2, -1))
+        x = F.relu(x)
+        x = F.dropout(x, self.dropout_prob, training=self.training)
+        x = self.out_net(x)
+        return x
+
+
 class UniqueEq2Net(nn.Module):
-    def __init__(self, in_dim, hid_dim, out_dim, ops_func=eops_2_to_2, dropout_prob=0, nlayers=1, **kwargs):
+    def __init__(self, in_dim, hid_dim, out_dim, dropout_prob=0, nlayers=1, **kwargs):
         super(UniqueEq2Net, self).__init__()
         self.embed = BasicConvNet(in_dim, hid_dim, **kwargs)
-        self.eq_net = Net2to2([(hid_dim, hid_dim)] * nlayers, out_dim, ops_func=ops_func)
+        #self.eq_net = Net2to2([(hid_dim, hid_dim)] * nlayers, out_dim, ops_func=ops_func)
+        self.eq_net = Eq2to2(hid_dim, out_dim)
         self.out_net = nn.Linear(out_dim, 1)
         self.dropout_prob = dropout_prob
 
@@ -67,7 +98,7 @@ class UniqueEq2Net(nn.Module):
         x = self.eq_net(x)
         x = F.relu(x)
         x = F.dropout(x, self.dropout_prob, training=self.training)
-        x = x.sum(dim=(-3, -2))
+        x = x.sum(dim=(-2, -1))
         x = F.relu(x)
         x = F.dropout(x, self.dropout_prob, training=self.training)
         x = self.out_net(x)
@@ -137,6 +168,10 @@ def main(args):
     if args.model == 'baseline':
         kwargs = {'nchannels': args.nchannels, 'conv_layers': args.conv_layers, 'dropout': args.conv_dropout}
         model = MiniDeepSets(in_dim, args.hid_dim, out_dim=1, **kwargs).to(device)
+    elif args.model == 'eq12':
+        kwargs = {'nchannels': args.nchannels, 'dropout': args.dropout_prob, 'conv_layers': args.conv_layers, 'dropout': args.conv_dropout}
+        model = UniqueEq12Net(in_dim, args.hid_dim, args.out_dim, dropout_prob=args.dropout_prob, nlayers=args.num_eq_layers, **kwargs)
+        model = model.to(device)
     elif args.model == 'eq2':
         kwargs = {'nchannels': args.nchannels, 'dropout': args.dropout_prob, 'conv_layers': args.conv_layers, 'dropout': args.conv_dropout}
         model = UniqueEq2Net(in_dim, args.hid_dim, args.out_dim, dropout_prob=args.dropout_prob, nlayers=args.num_eq_layers, **kwargs)
@@ -209,10 +244,6 @@ def main(args):
                     ncorrect += (estimated == y.int()).sum().item()
                     val_losses.append(loss.item())
                     tot += len(x)
-
-                if e == 19:
-                    print('Done with 10 epochs!')
-                    pdb.set_trace()
 
             acc = ncorrect / tot
             log.info('Epoch {:4d} | Last ep acc: {:.2f}, loss: {:.2f} | Test acc: {:.2f}, loss: {:.2f}'.format(

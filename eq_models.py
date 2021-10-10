@@ -56,13 +56,13 @@ class Eq1to2(nn.Module):
         self.bias = nn.Parameter(torch.zeros(1, out_dim, 1, 1))
 
     def forward(self, inputs):
-        ops = ops_1_to_2(inputs)
+        ops = eops_1_to_2(inputs)
         output = torch.einsum('dsb,ndbij->nsij', self.coefs, ops)
         output = output + self.bias
         return output
 
 class Eq2to2(nn.Module):
-    def __init__(self, in_dim, out_dim, ops_func=None):
+    def __init__(self, in_dim, out_dim, ops_func=eops_2_to_2):
         super(Eq2to2, self).__init__()
         self.basis_dim = 15
         self.out_dim = out_dim
