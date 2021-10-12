@@ -11,13 +11,13 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset
 from torchvision.datasets import MNIST, Omniglot
 from torchvision import transforms
-from torch.utils.data import DataLoader, Dataset, BatchSampler, SequentialSampler
+from torch.utils.data import DataLoader, Dataset, BatchSampler, RandomSampler, SequentialSampler, SubsetRandomSampler
 
 from conv import BasicConvNet
 from equivariant_layers_expand import *
 from eq_models import *
 from models import MLP
-from omni_data import OmniSetData
+from omni_data import OmniSetData, StochasticOmniSetData
 from utils import setup_experiment_log, get_logger, check_memory
 
 def nparams(model):
@@ -25,6 +25,22 @@ def nparams(model):
     for p in model.parameters():
         tot += p.numel()
     return tot
+
+def try_load_weights(savedir, model, device, saved=True):
+    if not saved:
+        return False, 0
+
+    files = os.listdir(savedir)
+    models = [f[f.index('model'):] for f in files if 'model_' in f and 'final' not in f]
+    if len(models) == 0:
+        return False, 0
+
+    max_ep = max([int(f[6:f.index('.')]) for f in models])
+    fname = os.path.join(savedir, f'model_{max_ep}.pt')
+    sd = torch.load(fname, map_location=device)
+
+    model.load_state_dict(sd)
+    return True, max_ep
 
 def neg_ll(pred, y, factorial_y):
     log_lik = y*torch.log(pred) - pred - torch.log(factorial_y)
@@ -148,17 +164,21 @@ def main(args):
                                          std=[0.08426, 0.08426, 0.08426])
     transform = transforms.Compose([transforms.ToTensor(), normalize])
     omni = Omniglot(root='./data/', transform=transform, background=True, download=True)
-    train_dataset = OmniSetData.from_files(args.idx_pkl, args.tgt_pkl, omni, args.train_fraction)
+    train_dataset = StochasticOmniSetData(omni, epoch_len=12800, max_set_length=10)
+    #test_dataset = StochasticOmniSetData(omni, epoch_len=6400, max_set_length=12)
+    #train_dataset = OmniSetData.from_files(args.idx_pkl, args.tgt_pkl, omni, args.train_fraction)
     test_dataset = OmniSetData.from_files(args.test_idx_pkl, args.test_tgt_pkl, omni)
+    print(test_dataset)
     train_dataloader = DataLoader(dataset=train_dataset,
         sampler=BatchSampler(
-            SequentialSampler(train_dataset), batch_size=args.batch_size, drop_last=False
+            #SequentialSampler(train_dataset), batch_size=args.batch_size, drop_last=False
+            RandomSampler(train_dataset), batch_size=args.batch_size, drop_last=False
         ),
         num_workers=args.num_workers, pin_memory=args.pin
     )
     test_dataloader = DataLoader(dataset=test_dataset,
         sampler=BatchSampler(
-            SequentialSampler(test_dataset), batch_size=args.batch_size, drop_last=False
+            RandomSampler(test_dataset), batch_size=args.batch_size, drop_last=False
         ),
         num_workers=args.num_workers, pin_memory=args.pin
     )
@@ -180,12 +200,20 @@ def main(args):
         model = UniqueEq3Net(in_dim, args.hid_dim, args.out_dim, dropout_prob=args.dropout_prob)
         model = model.to(device)
 
-    log.info('Post model to device: Consumed {:.2f}mb mem'.format(check_memory(False)))
-    for p in model.parameters():
-        if len(p.shape) == 1:
-            torch.nn.init.zeros_(p)
-        else:
-            torch.nn.init.xavier_uniform_(p)
+    loaded, start_epoch = try_load_weights(savedir, model, device, args.save)
+    if not loaded:
+        log.info('Init method: {}'.format(args.init_method))
+        for p in model.parameters():
+            if len(p.shape) == 1:
+                torch.nn.init.zeros_(p)
+            else:
+                if args.init_method == 'xavier_uniform':
+                    torch.nn.init.xavier_uniform_(p)
+                elif args.init_method == 'xavier_normal':
+                    torch.nn.init.xavier_normal_(p)
+        start_epoch = 0
+    else:
+        log.info(f'Loaded weights from {savedir}')
 
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     if args.lr_decay:
@@ -198,9 +226,10 @@ def main(args):
     out_func = F.softplus if args.out_func == 'softplus' else torch.exp
     log.info('Output function: {}'.format(out_func))
 
-    for e in (range(args.epochs)):
+    for e in range(start_epoch, start_epoch + args.epochs+ 1):
         batch_losses = []
         ncorrect = 0
+        tot_ae = 0
         tot = 0
         bcnt = 0
         for batch in (train_dataloader):
@@ -213,22 +242,32 @@ def main(args):
 
             loss = torch.sum(neg_ll(ypred, y, factorial_y))
             estimated = torch.round(ypred).int()
+            tot_ae += torch.abs(ypred - y).sum().item()
             ncorrect += torch.sum(estimated==y).item()
             tot += len(x)
             batch_losses.append(loss.item())
+            if torch.isnan(loss):
+                for p in model.parameters():
+                    p.data *= 0.8
+                continue
+
             loss.backward()
+            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step()
             bcnt += 1
 
-            #if bcnt % 100 == 0:
-            #    print('     Batch {} | Running acc: {:.2f}, Loss: {:.2f}'.format(bcnt, ncorrect / tot, np.mean(batch_losses)))
-
+        epoch_mae = tot_ae / tot
         epoch_acc = ncorrect / tot
         epoch_loss = np.mean(batch_losses)
+        if swr:
+            swr.add_scalar('train/acc', epoch_acc, e)
+            swr.add_scalar('train/mae', epoch_mae, e)
+            swr.add_scalar('train/loss', epoch_loss, e)
 
         if e % args.print_update == 0:
             model.eval()
             val_losses = []
+            aes = []
             ncorrect = tot = 0
 
             with torch.no_grad():
@@ -243,15 +282,24 @@ def main(args):
                     estimated = torch.round(ypred).int()
                     ncorrect += (estimated == y.int()).sum().item()
                     val_losses.append(loss.item())
+                    aes.extend(torch.abs(ypred - y).tolist())
                     tot += len(x)
 
             acc = ncorrect / tot
-            log.info('Epoch {:4d} | Last ep acc: {:.2f}, loss: {:.2f} | Test acc: {:.2f}, loss: {:.2f}'.format(
-                     e, epoch_acc, epoch_loss, acc, np.mean(val_losses)))
+            mae = np.mean(aes)
+            std_ae = np.std(aes)
+            if swr:
+                swr.add_scalar('test/acc', acc, e)
+                swr.add_scalar('test/mae', mae, e)
+                swr.add_scalar('test/std_ae', std_ae, e)
+            log.info('Epoch {:4d} | Last ep acc: {:.4f}, mae: {:.4f}, loss: {:.2f} | Test acc: {:.4f}, mae: {:.4f}, std mae: {:.3f}'.format(
+                     e, epoch_acc, epoch_mae, epoch_loss, acc, mae, std_ae))
+            model.train()
             if args.lr_decay:
                 scheduler.step(np.mean(val_losses))
 
-            model.train()
+        if e % args.save_iter == 0 and e > 0:
+            torch.save(model.state_dict(), os.path.join(savedir, f'model_{e}.pt'))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -259,8 +307,8 @@ if __name__ == '__main__':
     parser.add_argument('--exp_name', type=str, default='')
     parser.add_argument('--idx_pkl', type=str, default='./data/omniglot-py/unique_chars_dataset/train_idx_1.pkl')
     parser.add_argument('--tgt_pkl', type=str, default='./data/omniglot-py/unique_chars_dataset/train_targets_1.pkl')
-    parser.add_argument('--test_idx_pkl', type=str, default='./data/omniglot-py/unique_chars_dataset/test_idx_1.pkl')
-    parser.add_argument('--test_tgt_pkl', type=str, default='./data/omniglot-py/unique_chars_dataset/test_targets_1.pkl')
+    parser.add_argument('--test_idx_pkl', type=str, default='./data/omniglot-py/unique_chars_dataset/test_idx_2.pkl')
+    parser.add_argument('--test_tgt_pkl', type=str, default='./data/omniglot-py/unique_chars_dataset/test_targets_2.pkl')
     parser.add_argument('--img_fn', type=str, default='./data/omniglot-py/train_images.npy')
 
     parser.add_argument('--save', default=False, action='store_true')
@@ -274,7 +322,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_eq_layers', type=int, default=1)
     parser.add_argument('--epochs', type=int, default=10000)
     parser.add_argument('--print_update', type=int, default=1)
-    parser.add_argument('--save_iter', type=int, default=5000)
+    parser.add_argument('--save_iter', type=int, default=5)
     parser.add_argument('--cuda', action='store_true', default=False)
     parser.add_argument('--num_workers', type=int, default=0)
     parser.add_argument('--pin', action='store_true', default=False)
@@ -288,5 +336,6 @@ if __name__ == '__main__':
     parser.add_argument('--lr_factor', type=float, default=0.5)
     parser.add_argument('--lr_patience', type=int, default=3)
     parser.add_argument('--train_fraction', type=float, default=1)
+    parser.add_argument('--init_method', type=str, default='xavier_uniform')
     args = parser.parse_args()
     main(args)
