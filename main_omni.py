@@ -20,6 +20,7 @@ from eq_models import *
 from models import MLP
 from omni_data import OmniSetData, StochasticOmniSetData
 from utils import setup_experiment_log, get_logger, check_memory
+from modules import SAB, PMA
 
 def nparams(model):
     tot = 0
@@ -80,14 +81,18 @@ def neg_ll(pred, y, factorial_y):
 class MiniDeepSets(nn.Module):
     def __init__(self, in_dim, enc_dim, dec_dim, **kwargs):
         super(MiniDeepSets, self).__init__()
-        self.embed = BasicConvNet(in_dim, enc_dim, **kwargs)
+        self.embed = BasicConvNet(in_dim, enc_dim)
         self.dec = nn.Sequential(
             nn.Linear(enc_dim, dec_dim),
             nn.ReLU(),
+            #nn.Dropout(kwargs['dropout']),
             nn.Linear(dec_dim, dec_dim),
             nn.ReLU(),
-            nn.Linear(dec_dim, 1)
+            #nn.Dropout(kwargs['dropout']),
+            nn.Linear(dec_dim, dec_dim)
         )
+        self.fc1 = nn.Linear(dec_dim, dec_dim)
+        self.fc2 = nn.Linear(dec_dim, 1)
 
     def forward(self, x):
         '''
@@ -97,9 +102,13 @@ class MiniDeepSets(nn.Module):
         x = x.view(B * k, 1, h, w)
         x = self.embed(x)
         x = F.relu(x)
+        x = self.dec(x) # (B*k) x d
         x = x.view(B, k, x.shape[-1])
         x = x.sum(dim=1)
-        x = self.dec(x)
+        x = F.relu(x)
+        x = self.fc1(x)
+        x = F.relu(x)
+        x = self.fc2(x)
         return x
 
 class UniqueEq12Net(nn.Module):
@@ -181,6 +190,29 @@ class UniqueEq3Net(nn.Module):
         x = self.out_net(x)
         return x
 
+class MiniSetTransformer(nn.Module):
+    def __init__(self, hid_dim=64):
+        super(MiniSetTransformer, self).__init__()
+        self.embed = BasicConvNet(105, hid_dim)
+        self.enc = nn.Sequential(
+            SAB(dim_in=hid_dim, dim_out=hid_dim, num_heads=4),
+            SAB(dim_in=hid_dim, dim_out=hid_dim, num_heads=4)
+        )
+
+        self.dec = nn.Sequential(
+            PMA(dim=hid_dim, num_heads=8, num_seeds=1),
+            nn.Linear(hid_dim, 1)
+        )
+    def forward(self, x):
+        B, k, h, w = x.shape
+        x = x.view(B * k, 1, h, w)
+        x = self.embed(x)
+        x = F.relu(x)
+        x = x.view(B, k, x.shape[-1])
+        x = self.enc(x)
+        x = self.dec(x)
+        return x.squeeze(-1)
+
 def set_seeds(s):
     torch.backends.cudnn.deterministic = True
     torch.manual_seed(s)
@@ -223,7 +255,7 @@ def main(args):
     log.info('Post load data: Consumed {:.2f}mb mem'.format(check_memory(False)))
     in_dim = 105
     if args.model == 'baseline':
-        kwargs = {'nchannels': args.nchannels, 'conv_layers': args.conv_layers, 'dropout': args.conv_dropout}
+        kwargs = {'nchannels': args.nchannels, 'conv_layers': args.conv_layers, 'dropout': args.dropout_prob}
         model = MiniDeepSets(in_dim, args.hid_dim, args.out_dim, **kwargs).to(device)
     elif args.model == 'eq12':
         kwargs = {'nchannels': args.nchannels, 'dropout': args.dropout_prob, 'conv_layers': args.conv_layers, 'dropout': args.conv_dropout}
@@ -238,6 +270,9 @@ def main(args):
         model = model.to(device)
     elif args.model == 'dmps':
         model = torch_sigma()
+        model = model.to(device)
+    elif args.model == 'set':
+        model = MiniSetTransformer(args.hid_dim)
         model = model.to(device)
 
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -342,7 +377,7 @@ def main(args):
             if args.lr_decay:
                 scheduler.step(np.mean(val_losses))
 
-        if e % args.save_iter == 0 and e > 0:
+        if e % args.save_iter == 0 and e > 0 and args.save:
             checkpoint_fn = os.path.join(savedir, 'checkpoint.pth')
             save_checkpoint(e, model, opt, checkpoint_fn)
             torch.save(model.state_dict(), os.path.join(savedir, f'model_{e}.pt'))
@@ -368,7 +403,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_eq_layers', type=int, default=1)
     parser.add_argument('--epochs', type=int, default=10000)
     parser.add_argument('--print_update', type=int, default=1)
-    parser.add_argument('--save_iter', type=int, default=5)
+    parser.add_argument('--save_iter', type=int, default=10)
     parser.add_argument('--cuda', action='store_true', default=False)
     parser.add_argument('--num_workers', type=int, default=0)
     parser.add_argument('--pin', action='store_true', default=False)
