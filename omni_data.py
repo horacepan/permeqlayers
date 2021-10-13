@@ -43,7 +43,7 @@ class StochasticOmniSetData(Dataset):
         vals_unrolled = vals.reshape(-1)
         imgs = torch.stack([self.omni[i][0] for i in vals_unrolled])
         imgs = imgs.view(len(bidx), -1, 105, 105)
-        return imgs, unique_nums, vals_unrolled
+        return imgs, unique_nums
         #train_inds.append(vals)
         #train_labels.append(np.array(label_set))
         #return train_inds, train_labels
@@ -96,6 +96,7 @@ class OmniSetData(Dataset):
         bimgs = torch.stack([self.omni[i][0] for i in idxs_unrolled])
         bimgs = bimgs.reshape(len(new_bidx), -1, self._img_h, self._img_w)
         return bimgs, self.targets[seq_len][new_bidx]
+
 
 # DEPRECATED
 class SetDataset(Dataset):

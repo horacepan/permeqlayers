@@ -12,6 +12,7 @@ from torch.utils.data import Dataset
 from torchvision.datasets import MNIST, Omniglot
 from torchvision import transforms
 from torch.utils.data import DataLoader, Dataset, BatchSampler, RandomSampler, SequentialSampler, SubsetRandomSampler
+from torch_sigma_m import torch_sigma
 
 from conv import BasicConvNet
 from equivariant_layers_expand import *
@@ -25,6 +26,36 @@ def nparams(model):
     for p in model.parameters():
         tot += p.numel()
     return tot
+
+def save_checkpoint(epoch, model, optimizer, fname):
+    state = {'epoch': epoch + 1,
+             'state_dict': model.state_dict(),
+             'optimizer': optimizer.state_dict()}
+    torch.save(state, fname)
+
+def load_checkpoint(model, optimizer, log, filename='checkpoint.pth.tar'):
+    '''
+    model: nn.Module object
+    optimizer: torch.optim object
+    log: log object
+    filename: str file name of the checkpoint
+    '''
+    # Note: Input model & optimizer should be pre-defined.  This routine only updates their states.
+    start_epoch = 0
+    if os.path.isfile(filename):
+        log.info("=> loading checkpoint '{}'".format(filename))
+        checkpoint = torch.load(filename)
+        start_epoch = checkpoint['epoch']
+        model.load_state_dict(checkpoint['state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        log.info("=> loaded checkpoint '{}' (epoch {})"
+                  .format(filename, checkpoint['epoch']))
+        success = True
+    else:
+        log.info("=> no checkpoint found at '{}'".format(filename))
+        success = False
+
+    return model, optimizer, start_epoch, success
 
 def try_load_weights(savedir, model, device, saved=True):
     if not saved:
@@ -47,10 +78,16 @@ def neg_ll(pred, y, factorial_y):
     return -log_lik
 
 class MiniDeepSets(nn.Module):
-    def __init__(self, in_dim, hid_dim, out_dim, **kwargs):
+    def __init__(self, in_dim, enc_dim, dec_dim, **kwargs):
         super(MiniDeepSets, self).__init__()
-        self.embed = BasicConvNet(in_dim, hid_dim, **kwargs)
-        self.fc_out = nn.Linear(hid_dim, out_dim)
+        self.embed = BasicConvNet(in_dim, enc_dim, **kwargs)
+        self.dec = nn.Sequential(
+            nn.Linear(enc_dim, dec_dim),
+            nn.ReLU(),
+            nn.Linear(dec_dim, dec_dim),
+            nn.ReLU(),
+            nn.Linear(dec_dim, 1)
+        )
 
     def forward(self, x):
         '''
@@ -62,7 +99,7 @@ class MiniDeepSets(nn.Module):
         x = F.relu(x)
         x = x.view(B, k, x.shape[-1])
         x = x.sum(dim=1)
-        x = self.fc_out(x)
+        x = self.dec(x)
         return x
 
 class UniqueEq12Net(nn.Module):
@@ -168,7 +205,7 @@ def main(args):
     #test_dataset = StochasticOmniSetData(omni, epoch_len=6400, max_set_length=12)
     #train_dataset = OmniSetData.from_files(args.idx_pkl, args.tgt_pkl, omni, args.train_fraction)
     test_dataset = OmniSetData.from_files(args.test_idx_pkl, args.test_tgt_pkl, omni)
-    print(test_dataset)
+    log.info('Test data is: {}'.format(test_dataset))
     train_dataloader = DataLoader(dataset=train_dataset,
         sampler=BatchSampler(
             #SequentialSampler(train_dataset), batch_size=args.batch_size, drop_last=False
@@ -187,7 +224,7 @@ def main(args):
     in_dim = 105
     if args.model == 'baseline':
         kwargs = {'nchannels': args.nchannels, 'conv_layers': args.conv_layers, 'dropout': args.conv_dropout}
-        model = MiniDeepSets(in_dim, args.hid_dim, out_dim=1, **kwargs).to(device)
+        model = MiniDeepSets(in_dim, args.hid_dim, args.out_dim, **kwargs).to(device)
     elif args.model == 'eq12':
         kwargs = {'nchannels': args.nchannels, 'dropout': args.dropout_prob, 'conv_layers': args.conv_layers, 'dropout': args.conv_dropout}
         model = UniqueEq12Net(in_dim, args.hid_dim, args.out_dim, dropout_prob=args.dropout_prob, nlayers=args.num_eq_layers, **kwargs)
@@ -199,32 +236,39 @@ def main(args):
     elif args.model == 'eq3':
         model = UniqueEq3Net(in_dim, args.hid_dim, args.out_dim, dropout_prob=args.dropout_prob)
         model = model.to(device)
-
-    loaded, start_epoch = try_load_weights(savedir, model, device, args.save)
-    if not loaded:
-        log.info('Init method: {}'.format(args.init_method))
-        for p in model.parameters():
-            if len(p.shape) == 1:
-                torch.nn.init.zeros_(p)
-            else:
-                if args.init_method == 'xavier_uniform':
-                    torch.nn.init.xavier_uniform_(p)
-                elif args.init_method == 'xavier_normal':
-                    torch.nn.init.xavier_normal_(p)
-        start_epoch = 0
-    else:
-        log.info(f'Loaded weights from {savedir}')
+    elif args.model == 'dmps':
+        model = torch_sigma()
+        model = model.to(device)
 
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
+    model, opt, start_epoch, load_success = load_checkpoint(model, opt, log, os.path.join(savedir, 'checkpoint.pth'))
+    if not load_success:
+        loaded, start_epoch = try_load_weights(savedir, model, device, args.save)
+        if not loaded:
+            log.info('Nothing to load. Init weights with: {}'.format(args.init_method))
+            for p in model.parameters():
+                if len(p.shape) == 1:
+                    torch.nn.init.zeros_(p)
+                else:
+                    if args.init_method == 'xavier_uniform':
+                        torch.nn.init.xavier_uniform_(p)
+                    elif args.init_method == 'xavier_normal':
+                        torch.nn.init.xavier_normal_(p)
+            start_epoch = 0
+        else:
+            log.info(f'Loaded weights from {savedir}')
+    else:
+        log.info(f'Loaded weights from checkpoint in {savedir}')
+
     if args.lr_decay:
         log.info('Doing lr decay: factor {}, patience: {}'.format(args.lr_factor, args.lr_patience))
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, 'min', factor=args.lr_factor, patience=args.lr_patience)
 
     log.info('Starting training on: {}'.format(model.__class__))
     log.info('Model parameters: {}'.format(nparams(model)))
-    model.train()
     out_func = F.softplus if args.out_func == 'softplus' else torch.exp
     log.info('Output function: {}'.format(out_func))
+    model.train()
 
     for e in range(start_epoch, start_epoch + args.epochs+ 1):
         batch_losses = []
@@ -299,6 +343,8 @@ def main(args):
                 scheduler.step(np.mean(val_losses))
 
         if e % args.save_iter == 0 and e > 0:
+            checkpoint_fn = os.path.join(savedir, 'checkpoint.pth')
+            save_checkpoint(e, model, opt, checkpoint_fn)
             torch.save(model.state_dict(), os.path.join(savedir, f'model_{e}.pt'))
 
 if __name__ == '__main__':

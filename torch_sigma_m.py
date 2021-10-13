@@ -169,8 +169,9 @@ class torch_sigma(nn.Module):
             z = torch.mm(k,z)
         return z
 
-    def forward(self, H,b_size):
+    def forward(self, H):
         init_size = len(H.shape)
+        b_size = H.shape[0]
         if init_size == 4:
             H = H.reshape(H.shape[0]*H.shape[1],1,H.shape[3],H.shape[3])
             H = self.feature_extractor_part1(H)
@@ -211,4 +212,4 @@ class torch_sigma(nn.Module):
             M = torch.max(H6,0)[0]
         r = self.classifier(M)
         r = torch.exp(r)
-        return r,self.sigma.weight.data.item()
+        return r #,self.sigma.weight.data.item()
