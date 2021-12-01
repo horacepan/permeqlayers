@@ -76,7 +76,12 @@ class Eq3Net(nn.Module):
         self.eq_net = SetNet3to3(layers, out_dim, ops_func=ops_func)
         self.out_net = nn.Linear(out_dim, 1)
         self.dropout_prob = dropout_prob
-        self.pool = torch.sum if pool == 'sum' else torch.amax
+        if pool == 'sum':
+            self.pool = torch.sum
+        elif pool == 'mean':
+            self.pool = torch.mean
+        else:
+             pool == torch.amax
 
     def forward(self, xcat, xfeat):
         x = self.embed(xcat)

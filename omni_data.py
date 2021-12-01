@@ -21,7 +21,7 @@ class StochasticOmniSetData(Dataset):
 
     def __getitem__(self, bidx):
         batch_size = len(bidx)
-        set_length = np.random.randint(1, self.max_set_length)
+        set_length = np.random.randint(6, self.max_set_length + 1)
         unique_nums = np.random.randint(1,(set_length+1), batch_size)
         vals = np.zeros((batch_size, set_length), dtype=int)
 

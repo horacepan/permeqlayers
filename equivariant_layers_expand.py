@@ -64,7 +64,8 @@ def eops_2_to_2(inputs, normalize=False):
     ops[1]  = torch.diag_embed(diag_part) # N x D x m x m
     ops[2]  = torch.diag_embed(sum_diag_part.expand(-1, -1, dim))
     ops[3]  = torch.diag_embed(sum_rows)
-    ops[4]  = torch.diag_embed(sum_rows)
+    #ops[4]  = torch.diag_embed(sum_rows)
+    ops[4]  = torch.diag_embed(sum_cols)
     ops[5]  = torch.diag_embed(sum_all.unsqueeze(-1).expand(-1, -1, dim))
     ops[6]  = sum_cols.unsqueeze(3).expand(-1, -1, -1, dim)
     ops[7]  = sum_rows.unsqueeze(3).expand(-1, -1, -1, dim)
@@ -84,6 +85,19 @@ def eops_2_to_2(inputs, normalize=False):
             ops[i] = torch.divide(op, dim * dim)
         else:
             ops[i] = torch.divide(op, dim)
+    return torch.stack(ops[1:], dim=2)
+
+def eset_ops_1_to_3(inputs):
+    N, D, m = inputs.shape
+    dim = inputs.shape[-1]
+    sum_all = inputs.sum(dim=-1)
+    x = inputs
+    ops = [None] * 5
+
+    ops[1] = sum_all.view(N, D, 1, 1, 1).expand(-1, -1, dim, dim, dim) / m
+    ops[2] = x.view(N, D, m, 1, 1).expand(-1, -1, -1, m, m)
+    ops[3] = x.view(N, D, 1, m, 1).expand(-1, -1, m, -1, m)
+    ops[4] = x.view(N, D, 1, 1, m).expand(-1, -1, m, m, -1)
     return torch.stack(ops[1:], dim=2)
 
 def eset_ops_3_to_3(inputs, normalize=True):

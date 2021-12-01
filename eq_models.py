@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from models import MLP
 from equivariant_layers import ops_2_to_1, ops_1_to_2, ops_1_to_1, ops_2_to_2, set_ops_3_to_3, set_ops_4_to_4
-from equivariant_layers_expand import eops_1_to_1, eops_1_to_2, eops_2_to_1, eops_2_to_2, eset_ops_3_to_3, eset_ops_4_to_4
+from equivariant_layers_expand import eops_1_to_1, eops_1_to_2, eops_2_to_1, eops_2_to_2, eset_ops_3_to_3, eset_ops_4_to_4, eset_ops_1_to_3
 
 class Eq1to1(nn.Module):
     def __init__(self, in_dim, out_dim, ops_func=None):
@@ -153,6 +153,28 @@ class Net2to2(nn.Module):
         x = x.permute(0, 2, 3, 1)
         output = self.out_net(x)
         return output
+
+class Eq1to3(nn.Module):
+    def __init__(self, in_dim, out_dim, ops_func=None):
+        super(Eq1to3, self).__init__()
+        self.basis_dim = 4
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.coefs = nn.Parameter(torch.normal(0, np.sqrt(2.0 / (in_dim + out_dim + self.basis_dim)),
+                                  (in_dim, out_dim, self.basis_dim)))
+        self.bias = nn.Parameter(torch.zeros(1, out_dim, 1, 1, 1))
+        if ops_func is None:
+            self.ops_func = eset_ops_1_to_3
+        else:
+            self.ops_func = ops_func
+
+    def forward(self, x):
+        ops = self.ops_func(x)
+        output = torch.einsum('dsb,ndbijk->nsijk', self.coefs, ops) # in/out/basis, batch/in/basis/ijk
+        output = output + self.bias
+        return output
+
+
 
 class SetEq3to3(nn.Module):
     def __init__(self, in_dim, out_dim, ops_func=None):

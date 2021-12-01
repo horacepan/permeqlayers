@@ -3,6 +3,7 @@ import psutil
 import sys
 import json
 import logging
+import torch
 from tensorboardX import SummaryWriter
 from argparse import Namespace
 
@@ -68,6 +69,31 @@ def check_memory(verbose=True):
         print("Consumed {:.2f}mb memory".format(mem))
     return mem
 
+def save_checkpoint(epoch, model, optimizer, fname):
+    state = {
+        'epoch': epoch + 1,
+        'state_dict': model.state_dict(),
+        'optimizer': optimizer.state_dict()
+    }
+    torch.save(state, fname)
+
+def load_checkpoint(model, optimizer, log, fname):
+    start_epoch = 0
+    if os.path.isfile(fname):
+        log.info("=> loading checkpoint '{}'".format(fname))
+        checkpoint = torch.load(fname)
+        start_epoch = checkpoint['epoch']
+        model.load_state_dict(checkpoint['state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        log.info("=> loaded checkpoint '{}' (epoch {})"
+                  .format(fname, checkpoint['epoch']))
+        success = True
+    else:
+        log.info("=> no checkpoint found at '{}'".format(fname))
+        success = False
+
+    return model, optimizer, start_epoch, success
+
 '''
 def load_train_test(dataset, root='./data/'):
     transform=transforms.Compose([
@@ -87,3 +113,4 @@ def load_train_test(dataset, root='./data/'):
         test = Omniglot(root, background=False, download=True, transform=transform)
     return train, test
 '''
+
