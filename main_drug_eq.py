@@ -13,7 +13,7 @@ from utils import get_logger, setup_experiment_log, save_checkpoint, load_checkp
 from drug_dataloader import PrevalenceDataset, PrevalenceCategoricalDataset, gen_sparse_drug_data
 from dataloader import Dataset, DataWithMask, BowDataset
 from main_drug import BaselineDeepSetsFeatCat, CatEmbedDeepSets
-from prevalence_models import Eq1Net, Eq2Net, Eq3Net, Eq4Net, Eq2DeepSet, Eq3NetMini, Eq3Set
+from prevalence_models import Eq1Net, Eq2Net, Eq3Net, Eq4Net, Eq2DeepSet, Eq3NetMini, Eq3Set, Eq2NetSet
 from eq_models import Eq2to2, Eq1to2, Eq1to3, SetEq3to3
 from equivariant_layers_expand import eops_2_to_2
 from modules import SAB, PMA
@@ -230,6 +230,11 @@ def main(args):
             args.embed_dim, layers, args.out_dim, args.dropout_prob, args.pool
         ))
         model = Eq2Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim, dropout_prob=args.dropout_prob, pool=args.pool).to(device)
+    elif args.eqn == 2 and args.model == 'eqset':
+        log.info('Eq2Set: {} embed, {} hid dim, {:.1f} dropout, pool mode {}, output {}'.format(
+            args.embed_dim, args.hid_dim, args.dropout_prob, args.pool, args.output
+        ))
+        model = Eq2NetSet(PrevalenceDataset.num_entities + 1, args.embed_dim, args.hid_dim, dropout_prob=args.dropout_prob, pool='mean', output=args.output).to(device)
     elif args.eqn == 3 and args.model == 'eq':
         log.info('Eq3net: {} embed, {} layers, {} final linear, {:.1f} dropout, pool mode {}'.format(
             args.embed_dim, layers, args.out_dim, args.dropout_prob, args.pool

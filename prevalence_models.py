@@ -74,6 +74,50 @@ class Eq2Net(nn.Module):
         x = self.out_net(x)
         return x
 
+class Eq2NetSet(nn.Module):
+    def __init__(self, nembed, embed_dim, hid_dim, ops_func=eops_2_to_2, dropout_prob=0.5, pool='mean', output='mlp'):
+        super(Eq2NetSet, self).__init__()
+        self.embed_dim = embed_dim
+        self.embed = nn.Embedding(nembed, embed_dim)
+        self.enc = nn.Sequential(
+            nn.Linear(embed_dim + 1, hid_dim),
+            nn.ReLU(),
+            nn.Linear(hid_dim, hid_dim),
+            nn.ReLU(),
+            nn.Linear(hid_dim, hid_dim)
+ ,       )
+        if output == 'linear':
+            self.dec = nn.Linear(hid_dim, 1)
+        elif output == 'mlp':
+            self.dec = nn.Sequential(
+                nn.Linear(hid_dim, hid_dim),
+                nn.ReLU(),
+                nn.Linear(hid_dim, hid_dim),
+                nn.ReLU(),
+                nn.Linear(hid_dim, 1)
+            )
+
+        self.dropout_prob = dropout_prob
+        if pool == 'sum':
+            self.pool = torch.sum
+        elif pool == 'mean':
+            self.pool = torch.mean
+        else:
+             pool == torch.amax
+
+    def forward(self, xcat, xfeat):
+        x = self.embed(xcat)
+        x = torch.cat([x, xfeat.unsqueeze(-1)], axis=-1)
+        x = torch.einsum('bid,bjd->bdij', x, x)
+        x = x.permute(0, 2, 3, 1)
+        x = self.enc(x)
+        x = F.relu(x)
+        x = self.pool(x, dim=(-3, -2))
+        x = F.relu(x)
+        x = F.dropout(x, self.dropout_prob, training=self.training)
+        x = self.dec(x)
+        return x
+
 class Eq3Net(nn.Module):
     def __init__(self, nembed, embed_dim, layers, out_dim, ops_func=eset_ops_3_to_3, dropout_prob=0.5, pool='sum'):
         super(Eq3Net, self).__init__()
