@@ -13,7 +13,7 @@ from utils import get_logger, setup_experiment_log, save_checkpoint, load_checkp
 from drug_dataloader import PrevalenceDataset, PrevalenceCategoricalDataset, gen_sparse_drug_data
 from dataloader import Dataset, DataWithMask, BowDataset
 from main_drug import BaselineDeepSetsFeatCat, CatEmbedDeepSets
-from prevalence_models import Eq1Net, Eq2Net, Eq3Net, Eq4Net, Eq2DeepSet
+from prevalence_models import Eq1Net, Eq2Net, Eq3Net, Eq4Net, Eq2DeepSet, Eq3NetMini, Eq3Set
 from eq_models import Eq2to2, Eq1to2, Eq1to3, SetEq3to3
 from equivariant_layers_expand import eops_2_to_2
 from modules import SAB, PMA
@@ -99,6 +99,37 @@ class SmallEq3Net(nn.Module):
         x = self.out_net(x)
         return x
 
+class BaselineDeepSet(nn.Module):
+    def __init__(self, nembed, embed_dim, hid_dim, out_dim, dropout_prob=0):
+        super(BaselineDeepSet, self).__init__()
+        self.embed = nn.Embedding(nembed, embed_dim)
+        self.enc = nn.Sequential(
+            nn.Linear(embed_dim + 1, hid_dim),
+            nn.ReLU(),
+            nn.Linear(hid_dim, hid_dim),
+            nn.ReLU(),
+            nn.Linear(hid_dim, hid_dim)
+        )
+        self.dec = nn.Sequential(
+            nn.Linear(hid_dim, hid_dim),
+            nn.ReLU(),
+            nn.Linear(hid_dim, out_dim),
+            nn.ReLU(),
+            nn.Linear(out_dim, 1)
+        )
+        self.dropout_prob = dropout_prob
+
+    def forward(self, xcat, xfeat):
+        x = self.embed(xcat)
+        x = torch.cat([x, xfeat.unsqueeze(-1)], axis=-1)
+        x = F.relu(x)
+        x = F.dropout(x, self.dropout_prob, training=self.training)
+        x = self.enc(x)
+        x = torch.mean(x, dim=1)
+        x = F.relu(x)
+        x = F.dropout(x, self.dropout_prob, training=self.training)
+        x = self.dec(x)
+        return x
 
 class DrugSetTransformer(nn.Module):
     def __init__(self, embed_dim, hid_dim):
@@ -204,6 +235,16 @@ def main(args):
             args.embed_dim, layers, args.out_dim, args.dropout_prob, args.pool
         ))
         model = Eq3Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim, dropout_prob=args.dropout_prob, pool='mean').to(device)
+    elif args.eqn == 3 and args.model == 'eqmini':
+        log.info('Eq3netMini: {} embed, {} hid dim, {:.1f} dropout, pool mode {}'.format(
+            args.embed_dim, layers, args.hid_dim, args.dropout_prob, args.pool
+        ))
+        model = Eq3NetMini(PrevalenceDataset.num_entities + 1, args.embed_dim, args.hid_dim, dropout_prob=args.dropout_prob, pool='mean').to(device)
+    elif args.eqn == 3 and args.model == 'eqset':
+        log.info('Eq3Set: {} embed, {} hid dim, {:.1f} dropout, pool mode {}, output {}'.format(
+            args.embed_dim, args.hid_dim, args.dropout_prob, args.pool, args.output
+        ))
+        model = Eq3Set(PrevalenceDataset.num_entities + 1, args.embed_dim, args.hid_dim, dropout_prob=args.dropout_prob, pool='mean', output=args.output).to(device)
     elif args.eqn == 4 and args.model == 'eq':
         model = Eq4Net(PrevalenceDataset.num_entities + 1, args.embed_dim, layers, args.out_dim).to(device)
     elif args.eqn == 2 and args.model == 'mlp':
@@ -224,6 +265,15 @@ def main(args):
     elif args.model == 'set2':
         log.info('Making SetTransformer with mlp out')
         model = BigDrugSetTransformer(args.embed_dim, args.hid_dim, args.out_dim).to(device)
+    elif args.model == 'baseline':
+        log.info('Doing new baseline with dropout {}, hid {}, out {}'.format(
+            args.dropout_prob, args.hid_dim, args.out_dim
+        ))
+        model = BaselineDeepSet(PrevalenceDataset.num_entities + 1,
+                                args.embed_dim,
+                                args.hid_dim,
+                                args.out_dim,
+                                dropout_prob=args.dropout_prob).to(device)
     else:
         log.info('Doing baseline with dropout {}, pool {}'.format(
             args.dropout_prob, args.pool
@@ -338,6 +388,7 @@ if __name__ == '__main__':
     parser.add_argument('--eqn', type=int, default=2)
     parser.add_argument('--model', type=str, default='baseline')
     parser.add_argument('--pool', type=str, default='sum')
+    parser.add_argument('--output', type=str, default='mlp')
     parser.add_argument('--dropout_prob', type=float, default=0)
     args = parser.parse_args()
     main(args)
