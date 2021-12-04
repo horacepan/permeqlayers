@@ -1,3 +1,4 @@
+import sys
 import pdb
 import os
 import argparse
@@ -154,17 +155,43 @@ class UniqueEq2Net(nn.Module):
         B, k, h, w = x.shape
         x = x.view(B * k, 1, h, w)
         x = self.embed(x)
-        x = F.relu(x)
+        #x = F.relu(x)
         x = x.view(B, k, x.shape[-1])
         x = torch.einsum('bid,bjd->bdij', x, x)
         x = self.eq_net(x)
         x = F.relu(x)
-        x = F.dropout(x, self.dropout_prob, training=self.training)
-        x = x.sum(dim=(-2, -1))
+        #x = F.dropout(x, self.dropout_prob, training=self.training)
+        x = x.mean(dim=(-2, -1))
         x = F.relu(x)
         x = F.dropout(x, self.dropout_prob, training=self.training)
         x = self.out_net(x)
         return x
+
+class UniqueEq3NetMini(nn.Module):
+    def __init__(self, in_dim, hid_dim, out_dim, ops_func=eset_ops_3_to_3, dropout_prob=0):
+        super(UniqueEq3NetMini, self).__init__()
+        self.embed = BasicConvNet(in_dim, hid_dim)
+        self.eq_net = SetEq3to3(hid_dim, out_dim, ops_func=ops_func)
+        self.out_net = nn.Linear(out_dim, 1)
+        self.dropout_prob = dropout_prob
+
+    def forward(self, x):
+        B, k, h, w = x.shape
+        x1 = x.view(B * k, 1, h, w)
+        x2 = self.embed(x1)
+        #x3 = F.relu(x2)
+        #x4 = x3.view(B, k, x3.shape[-1])
+        x4 = x2.view(B, k, x2.shape[-1])
+        x5 = torch.einsum('bid,bjd,bkd->bdijk', x4, x4, x4)
+        x6 = self.eq_net(x5)
+        x6 = x6.permute(0, 2, 3, 4, 1)
+        x7 = F.relu(x6)
+        #x = F.dropout(x, self.dropout_prob, training=self.training)
+        x8 = x7.mean(dim=(-4, -3, -2))
+        x9 = F.relu(x8)
+        x10 = F.dropout(x9, self.dropout_prob, training=self.training)
+        x11 = self.out_net(x10)
+        return x11
 
 class UniqueEq3Net(nn.Module):
     def __init__(self, in_dim, hid_dim, out_dim, ops_func=eset_ops_3_to_3, dropout_prob=0):
@@ -176,19 +203,21 @@ class UniqueEq3Net(nn.Module):
 
     def forward(self, x):
         B, k, h, w = x.shape
-        x = x.view(B * k, 1, h, w)
-        x = self.embed(x)
-        x = F.relu(x)
-        x = x.view(B, k, x.shape[-1])
-        x = torch.einsum('bid,bjd,bkd->bdijk', x, x, x)
-        x = self.eq_net(x)
-        x = F.relu(x)
-        x = F.dropout(x, self.dropout_prob, training=self.training)
-        x = x.sum(dim=(-4, -3, -2))
-        x = F.relu(x)
-        x = F.dropout(x, self.dropout_prob, training=self.training)
-        x = self.out_net(x)
-        return x
+        x1 = x.view(B * k, 1, h, w)
+        x2 = self.embed(x1)
+        #x3 = F.relu(x2)
+        #x4 = x3.view(B, k, x3.shape[-1])
+        x4 = x2.view(B, k, x2.shape[-1])
+        x5 = torch.einsum('bid,bjd,bkd->bdijk', x4, x4, x4)
+        x6 = self.eq_net(x5)
+        x7 = F.relu(x6)
+        #x = F.dropout(x, self.dropout_prob, training=self.training)
+        x8 = x7.mean(dim=(-4, -3, -2))
+        x9 = F.relu(x8)
+        x10 = F.dropout(x9, self.dropout_prob, training=self.training)
+        x11 = self.out_net(x10)
+        return x11
+        #return x
 
 class MiniSetTransformer(nn.Module):
     def __init__(self, hid_dim=64):
@@ -219,13 +248,21 @@ def set_seeds(s):
     torch.cuda.manual_seed(s)
     np.random.seed(s)
 
+def make_exp_name(args):
+    name = '{}_{}h_{}o_{}seed'.format(args.model, args.hid_dim, args.out_dim, args.seed)
+    if args.lr_decay:
+        name += '_lrdecay'
+    return name
+
 def main(args):
-    logfile, swr = setup_experiment_log(args, args.savedir, args.exp_name, args.save)
-    savedir = os.path.join(args.savedir, args.exp_name)
+    exp_name = make_exp_name(args)
+    logfile, swr = setup_experiment_log(args, args.savedir, exp_name, args.save)
+    savedir = os.path.join(args.savedir, exp_name)
     log = get_logger(logfile)
     set_seeds(args.seed)
-    log.info('Starting experiment!')
-    log.info('Args')
+    log.info('Starting experiment! Saving in: {}'.format(exp_name))
+    log.info('Command line:')
+    log.info('python ' + ' '.join(sys.argv))
     log.info(args)
 
     device = torch.device("cuda:0" if args.cuda and torch.cuda.is_available() else "cpu")
@@ -233,10 +270,10 @@ def main(args):
                                          std=[0.08426, 0.08426, 0.08426])
     transform = transforms.Compose([transforms.ToTensor(), normalize])
     omni = Omniglot(root='./data/', transform=transform, background=True, download=True)
-    train_dataset = StochasticOmniSetData(omni, epoch_len=12800, max_set_length=10)
-    #test_dataset = StochasticOmniSetData(omni, epoch_len=6400, max_set_length=12)
+    train_dataset = StochasticOmniSetData(omni, epoch_len=12800, max_set_length=10, min_set_length=6)
+    test_dataset = StochasticOmniSetData(omni, epoch_len=6400, max_set_length=args.test_max_set_len, min_set_length=args.test_min_set_len)
     #train_dataset = OmniSetData.from_files(args.idx_pkl, args.tgt_pkl, omni, args.train_fraction)
-    test_dataset = OmniSetData.from_files(args.test_idx_pkl, args.test_tgt_pkl, omni)
+    #test_dataset = OmniSetData.from_files(args.test_idx_pkl, args.test_tgt_pkl, omni)
     log.info('Test data is: {}'.format(test_dataset))
     train_dataloader = DataLoader(dataset=train_dataset,
         sampler=BatchSampler(
@@ -260,38 +297,32 @@ def main(args):
     elif args.model == 'eq12':
         kwargs = {'nchannels': args.nchannels, 'dropout': args.dropout_prob, 'conv_layers': args.conv_layers, 'dropout': args.conv_dropout}
         model = UniqueEq12Net(in_dim, args.hid_dim, args.out_dim, dropout_prob=args.dropout_prob, nlayers=args.num_eq_layers, **kwargs)
-        model = model.to(device)
     elif args.model == 'eq2':
         kwargs = {'nchannels': args.nchannels, 'dropout': args.dropout_prob, 'conv_layers': args.conv_layers, 'dropout': args.conv_dropout}
         model = UniqueEq2Net(in_dim, args.hid_dim, args.out_dim, dropout_prob=args.dropout_prob, nlayers=args.num_eq_layers, **kwargs)
-        model = model.to(device)
     elif args.model == 'eq3':
         model = UniqueEq3Net(in_dim, args.hid_dim, args.out_dim, dropout_prob=args.dropout_prob)
-        model = model.to(device)
+    elif args.model == 'eq3mini':
+        model = UniqueEq3NetMini(in_dim, args.hid_dim, args.out_dim, dropout_prob=args.dropout_prob)
     elif args.model == 'dmps':
         model = torch_sigma()
-        model = model.to(device)
     elif args.model == 'set':
         model = MiniSetTransformer(args.hid_dim)
-        model = model.to(device)
 
+    model = model.to(device)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     model, opt, start_epoch, load_success = load_checkpoint(model, opt, log, os.path.join(savedir, 'checkpoint.pth'))
     if not load_success:
-        loaded, start_epoch = try_load_weights(savedir, model, device, args.save)
-        if not loaded:
-            log.info('Nothing to load. Init weights with: {}'.format(args.init_method))
-            for p in model.parameters():
-                if len(p.shape) == 1:
-                    torch.nn.init.zeros_(p)
-                else:
-                    if args.init_method == 'xavier_uniform':
-                        torch.nn.init.xavier_uniform_(p)
-                    elif args.init_method == 'xavier_normal':
-                        torch.nn.init.xavier_normal_(p)
-            start_epoch = 0
-        else:
-            log.info(f'Loaded weights from {savedir}')
+        log.info('Nothing to load. Init weights with: {}'.format(args.init_method))
+        for p in model.parameters():
+            if len(p.shape) == 1:
+                torch.nn.init.zeros_(p)
+            else:
+                if args.init_method == 'xavier_uniform':
+                    torch.nn.init.xavier_uniform_(p)
+                elif args.init_method == 'xavier_normal':
+                    torch.nn.init.xavier_normal_(p)
+        start_epoch = 0
     else:
         log.info(f'Loaded weights from checkpoint in {savedir}')
 
@@ -331,7 +362,7 @@ def main(args):
                 continue
 
             loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad)
             opt.step()
             bcnt += 1
 
@@ -380,7 +411,6 @@ def main(args):
         if e % args.save_iter == 0 and e > 0 and args.save:
             checkpoint_fn = os.path.join(savedir, 'checkpoint.pth')
             save_checkpoint(e, model, opt, checkpoint_fn)
-            torch.save(model.state_dict(), os.path.join(savedir, f'model_{e}.pt'))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -414,9 +444,12 @@ if __name__ == '__main__':
     parser.add_argument('--conv_dropout', type=float, default=0)
     parser.add_argument('--out_func', type=str, default='softplus')
     parser.add_argument('--lr_decay', action='store_true', default=False)
+    parser.add_argument('--clip_grad', type=float, default=0.5)
     parser.add_argument('--lr_factor', type=float, default=0.5)
     parser.add_argument('--lr_patience', type=int, default=3)
     parser.add_argument('--train_fraction', type=float, default=1)
     parser.add_argument('--init_method', type=str, default='xavier_uniform')
+    parser.add_argument('--test_min_set_len', type=int, default=6)
+    parser.add_argument('--test_max_set_len', type=int, default=10)
     args = parser.parse_args()
     main(args)

@@ -8,10 +8,11 @@ from torchvision import transforms
 from torchvision.datasets import Omniglot
 
 class StochasticOmniSetData(Dataset):
-    def __init__(self, omni, epoch_len, max_set_length=10):
+    def __init__(self, omni, epoch_len, max_set_length=10, min_set_length=6):
         self.omni = omni
         self._len = epoch_len # number of set samples in an epoch
         self.max_set_length = max_set_length
+        self.min_set_length = min_set_length
         self.probs = {n: np.ones(n) / n for n in range(1, max_set_length + 1)}
         self.labels = np.array([t[1] for t in omni._flat_character_images])
         self.unique_chars = len(set(self.labels))
@@ -21,7 +22,7 @@ class StochasticOmniSetData(Dataset):
 
     def __getitem__(self, bidx):
         batch_size = len(bidx)
-        set_length = np.random.randint(6, self.max_set_length + 1)
+        set_length = np.random.randint(self.min_set_length, self.max_set_length + 1)
         unique_nums = np.random.randint(1,(set_length+1), batch_size)
         vals = np.zeros((batch_size, set_length), dtype=int)
 
