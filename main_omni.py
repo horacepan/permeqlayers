@@ -1,3 +1,4 @@
+import time
 import sys
 import pdb
 import os
@@ -270,10 +271,14 @@ def main(args):
                                          std=[0.08426, 0.08426, 0.08426])
     transform = transforms.Compose([transforms.ToTensor(), normalize])
     omni = Omniglot(root='./data/', transform=transform, background=True, download=True)
-    train_dataset = StochasticOmniSetData(omni, epoch_len=12800, max_set_length=10, min_set_length=6)
-    test_dataset = StochasticOmniSetData(omni, epoch_len=6400, max_set_length=args.test_max_set_len, min_set_length=args.test_min_set_len)
-    #train_dataset = OmniSetData.from_files(args.idx_pkl, args.tgt_pkl, omni, args.train_fraction)
-    #test_dataset = OmniSetData.from_files(args.test_idx_pkl, args.test_tgt_pkl, omni)
+    if args.datatype == 'stochastic':
+        train_dataset = StochasticOmniSetData(omni, epoch_len=12800, max_set_length=10, min_set_length=6)
+        test_dataset = StochasticOmniSetData(omni, epoch_len=6400, max_set_length=args.test_max_set_len, min_set_length=args.test_min_set_len)
+    elif args.datatype == 'fixed':
+        log.info('Loading fixed splits')
+        train_dataset = OmniSetData.from_files(args.idx_pkl, args.tgt_pkl, omni, args.train_fraction)
+        test_dataset = OmniSetData.from_files(args.test_idx_pkl, args.test_tgt_pkl, omni)
+        log.info('Train data size: {} | Test data size: {}'.format(len(train_dataset), len(test_dataset)))
     log.info('Test data is: {}'.format(test_dataset))
     train_dataloader = DataLoader(dataset=train_dataset,
         sampler=BatchSampler(
@@ -342,6 +347,7 @@ def main(args):
         tot_ae = 0
         tot = 0
         bcnt = 0
+        st = time.time()
         for batch in (train_dataloader):
             opt.zero_grad()
             x, y = batch[0][0], batch[1][0] # batch sampler returns 1 x B x ...
@@ -365,7 +371,8 @@ def main(args):
             nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad)
             opt.step()
             bcnt += 1
-
+        end = time.time()
+        minibatchtime = (end - st) / bcnt
         epoch_mae = tot_ae / tot
         epoch_acc = ncorrect / tot
         epoch_loss = np.mean(batch_losses)
@@ -402,8 +409,8 @@ def main(args):
                 swr.add_scalar('test/acc', acc, e)
                 swr.add_scalar('test/mae', mae, e)
                 swr.add_scalar('test/std_ae', std_ae, e)
-            log.info('Epoch {:4d} | Last ep acc: {:.4f}, mae: {:.4f}, loss: {:.2f} | Test acc: {:.4f}, mae: {:.4f}, std mae: {:.3f}'.format(
-                     e, epoch_acc, epoch_mae, epoch_loss, acc, mae, std_ae))
+            log.info('Epoch {:4d} | Last ep acc: {:.4f}, mae: {:.4f}, loss: {:.2f} | Test acc: {:.4f}, mae: {:.4f}, std mae: {:.3f} | mb time: {:.5f}s'.format(
+                     e, epoch_acc, epoch_mae, epoch_loss, acc, mae, std_ae, minibatchtime))
             model.train()
             if args.lr_decay:
                 scheduler.step(np.mean(val_losses))
@@ -437,6 +444,7 @@ if __name__ == '__main__':
     parser.add_argument('--cuda', action='store_true', default=False)
     parser.add_argument('--num_workers', type=int, default=0)
     parser.add_argument('--pin', action='store_true', default=False)
+    parser.add_argument('--datatype', type=str, default='stochastic')
     parser.add_argument('--save_fn', type=str, default='')
     parser.add_argument('--model', type=str, default='baseline')
     parser.add_argument('--ops', type=str, default='expand')
