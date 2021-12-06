@@ -270,14 +270,16 @@ def main(args):
     normalize = transforms.Normalize(mean=[0.92206, 0.92206, 0.92206],
                                          std=[0.08426, 0.08426, 0.08426])
     transform = transforms.Compose([transforms.ToTensor(), normalize])
-    omni = Omniglot(root='./data/', transform=transform, background=True, download=True)
+    omni_train = Omniglot(root='./data/', transform=transform, background=True, download=True)
+    omni_test = Omniglot(root='./data/', transform=transform, background=False, download=True)
     if args.datatype == 'stochastic':
-        train_dataset = StochasticOmniSetData(omni, epoch_len=12800, max_set_length=10, min_set_length=6)
-        test_dataset = StochasticOmniSetData(omni, epoch_len=6400, max_set_length=args.test_max_set_len, min_set_length=args.test_min_set_len)
+        log.info('Background true for train, false for test')
+        train_dataset = StochasticOmniSetData(omni_train, epoch_len=12800, max_set_length=10, min_set_length=6)
+        test_dataset = StochasticOmniSetData(omni_test, epoch_len=6400, max_set_length=args.test_max_set_len, min_set_length=args.test_min_set_len)
     elif args.datatype == 'fixed':
-        log.info('Loading fixed splits')
-        train_dataset = OmniSetData.from_files(args.idx_pkl, args.tgt_pkl, omni, args.train_fraction)
-        test_dataset = OmniSetData.from_files(args.test_idx_pkl, args.test_tgt_pkl, omni)
+        log.info('Loading fixed splits') # note that the indices for train/test are disjoint here
+        train_dataset = OmniSetData.from_files(args.idx_pkl, args.tgt_pkl, omni_train, args.train_fraction)
+        test_dataset = OmniSetData.from_files(args.test_idx_pkl, args.test_tgt_pkl, omni_train)
         log.info('Train data size: {} | Test data size: {}'.format(len(train_dataset), len(test_dataset)))
     log.info('Test data is: {}'.format(test_dataset))
     train_dataloader = DataLoader(dataset=train_dataset,
